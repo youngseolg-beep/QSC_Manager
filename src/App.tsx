@@ -42,13 +42,12 @@ export default function App() {
     
     const dummyScores: Record<string, number> = {};
     CHECKLIST_ITEMS.forEach((item) => {
-      // 첫 번째 옵션(최고점)으로 자동 클릭 처리
       if (item.options && item.options.length > 0) {
         dummyScores[item.id] = item.options[0].val;
       }
     });
     setScores(dummyScores);
-    alert('⚡ 모든 항목이 [우수/준수]로 자동 채워졌습니다! 빠른 테스트를 진행하세요.');
+    alert('⚡ 모든 항목이 [우수/준수]로 자동 채워졌습니다!');
   };
 
   // 보관함 목록 불러오기
@@ -63,7 +62,7 @@ export default function App() {
       if (error) throw error;
       setSavedInspections(data || []);
     } catch (err: any) {
-      console.error(err);
+      console.error('Library Error:', err);
     } finally {
       setIsLoadingLibrary(false);
     }
@@ -136,7 +135,7 @@ export default function App() {
         const selectedVal = scores[item.id];
         if (selectedVal !== undefined) {
           if (selectedVal === -1) {
-            // 비해당(-) 제외
+            // 비해당 제외
           } else {
             totalMax += (item.maxScore || 0);
             totalCurrent += selectedVal;
@@ -196,7 +195,7 @@ export default function App() {
     });
   };
 
-  // DB 제출
+  // DB 제출 (네트워크 에러 예외 보강)
   const handleSubmit = async () => {
     if (!validateBasicInfo()) return;
     setIsSubmitting(true);
@@ -231,15 +230,19 @@ export default function App() {
         language: lang
       };
 
-      const { error } = await supabase.from('inspections').insert([payload]);
-      if (error) throw error;
+      const { data, error } = await supabase.from('inspections').insert([payload]).select();
+      
+      if (error) {
+        console.error('Supabase Insert Error:', error);
+        throw new Error(error.message || 'Supabase DB 저장 실패');
+      }
 
       alert(isEn ? '🎉 Saved to DB successfully!' : '🎉 성공적으로 Supabase DB에 저장되었습니다!');
       handleReset();
       setActiveTab('library');
     } catch (err: any) {
-      console.error(err);
-      alert(`⚠️ Error: ${err.message || 'Unknown error'}`);
+      console.error('Submit Catch Error:', err);
+      alert(`⚠️ DB 저장 실패: ${err.message || 'Supabase 연결 상태를 확인해 주세요.'}`);
     } finally {
       setIsSubmitting(false);
     }
@@ -347,7 +350,6 @@ export default function App() {
           </div>
 
           <div className="flex items-center gap-3 flex-wrap">
-            {/* ⚡ 더미데이터 자동채우기 버튼 */}
             <button
               onClick={fillDummyData}
               className="flex items-center gap-1.5 bg-amber-50 text-amber-700 px-3 py-1.5 rounded-lg text-xs font-bold border border-amber-300 hover:bg-amber-100 shadow-sm transition-all"
@@ -396,7 +398,6 @@ export default function App() {
           </div>
         </div>
 
-        {/* 탭 네비게이션 */}
         <div className="max-w-7xl mx-auto px-4 flex border-t border-slate-100">
           <button
             onClick={() => setActiveTab('hall')}
@@ -433,7 +434,6 @@ export default function App() {
         </div>
       </header>
 
-      {/* 메인 콘텐츠 */}
       <main className="max-w-7xl mx-auto px-4 py-6">
         {activeTab === 'hall' && (
           <div>
@@ -579,7 +579,6 @@ export default function App() {
         )}
       </main>
 
-      {/* 하단 액션 바 */}
       <footer className="fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 p-3 z-20 shadow-lg print:hidden">
         <div className="max-w-7xl mx-auto flex items-center justify-between gap-4">
           <div className="flex items-center gap-3">
@@ -626,7 +625,6 @@ export default function App() {
         </div>
       </footer>
 
-      {/* 사진 모달 */}
       {activePhotoModalItem && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl p-5 max-w-md w-full shadow-2xl">
@@ -675,7 +673,6 @@ export default function App() {
         </div>
       )}
 
-      {/* 보관함 상세보기 모달 */}
       {selectedInspection && (
         <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 overflow-y-auto">
           <div className="bg-white rounded-2xl max-w-2xl w-full p-6 shadow-2xl relative my-8">
