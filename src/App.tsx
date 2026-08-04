@@ -1,20 +1,20 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { 
   Building2, User, Calendar, CheckCircle2, 
-  RotateCcw, Send, ShieldCheck, ChevronRight, Camera, X, RefreshCw, Save, Globe
+  RotateCcw, Send, ShieldCheck, ChevronRight, Camera, X, RefreshCw, Save, Globe, FolderArchive, Printer, Eye
 } from 'lucide-react';
 import SignatureCanvas from 'react-signature-canvas';
 
 import { CHECKLIST_ITEMS } from './data';
 import { supabase } from './utils/supabase';
 
-// 데이터 카테고리별 분리 (홀 / 주방)
-const HALL_ITEMS = CHECKLIST_ITEMS.filter(item => item.category === '홀');
-const KITCHEN_ITEMS = CHECKLIST_ITEMS.filter(item => item.category === '주방');
+// 데이터 카테고리별 분리 (전체 연속 인덱스 매김)
+const HALL_ITEMS = CHECKLIST_ITEMS.filter(item => item.category === '홀').map((item, idx) => ({ ...item, globalIndex: idx + 1 }));
+const KITCHEN_ITEMS = CHECKLIST_ITEMS.filter(item => item.category === '주방').map((item, idx) => ({ ...item, globalIndex: idx + 1 }));
 
 export default function App() {
   const [lang, setLang] = useState<'ko' | 'en'>('ko');
-  const [activeTab, setActiveTab] = useState<'hall' | 'kitchen' | 'final'>('hall');
+  const [activeTab, setActiveTab] = useState<'hall' | 'kitchen' | 'final' | 'library'>('hall');
   const [branchName, setBranchName] = useState('');
   const [inspectorName, setInspectorName] = useState('');
   const [inspectionDate, setInspectionDate] = useState(new Date().toISOString().split('T')[0]);
@@ -24,11 +24,40 @@ export default function App() {
   const [activePhotoModalItem, setActivePhotoModalItem] = useState<any | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  // 보관함(Library) 목록 및 상세보기 모달
+  const [savedInspections, setSavedInspections] = useState<any[]>([]);
+  const [selectedInspection, setSelectedInspection] = useState<any | null>(null);
+  const [isLoadingLibrary, setIsLoadingLibrary] = useState(false);
+
   const managerSigRef = useRef<any>(null);
   const ownerSigRef = useRef<any>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const isEn = lang === 'en';
+
+  // 보관함 목록 불러오기
+  const fetchLibrary = async () => {
+    setIsLoadingLibrary(true);
+    try {
+      const { data, error } = await supabase
+        .from('inspections')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+      setSavedInspections(data || []);
+    } catch (err: any) {
+      console.error(err);
+    } finally {
+      setIsLoadingLibrary(false);
+    }
+  };
+
+  useEffect(() => {
+    if (activeTab === 'library') {
+      fetchLibrary();
+    }
+  }, [activeTab]);
 
   // 미체크 항목 식별
   const getUncheckedItems = (items: any[]) => {
@@ -51,12 +80,12 @@ export default function App() {
     return true;
   };
 
-  // 홀 완료 진행
+  // 홀 완료 (순서대로 1번부터 연속 번호 팝업 출력)
   const handleHallComplete = () => {
     if (!validateBasicInfo()) return;
     const unchecked = getUncheckedItems(HALL_ITEMS);
     if (unchecked.length > 0) {
-      const numbers = unchecked.map((item, idx) => `${idx + 1}`).join(', ');
+      const numbers = unchecked.map(item => `${item.globalIndex}번`).join(', ');
       alert(isEn 
         ? `⚠️ Unchecked items in Hall inspection.\nItem Nos: [ ${numbers} ]`
         : `⚠️ 홀 점검 미체크 항목이 있습니다.\n미체크 항목 번호: [ ${numbers} ]`
@@ -66,12 +95,12 @@ export default function App() {
     setActiveTab('kitchen');
   };
 
-  // 주방 완료 진행
+  // 주방 완료 (순서대로 1번부터 연속 번호 팝업 출력)
   const handleKitchenComplete = () => {
     if (!validateBasicInfo()) return;
     const unchecked = getUncheckedItems(KITCHEN_ITEMS);
     if (unchecked.length > 0) {
-      const numbers = unchecked.map((item, idx) => `${idx + 1}`).join(', ');
+      const numbers = unchecked.map(item => `${item.globalIndex}번`).join(', ');
       alert(isEn 
         ? `⚠️ Unchecked items in Kitchen inspection.\nItem Nos: [ ${numbers} ]`
         : `⚠️ 주방 점검 미체크 항목이 있습니다.\n미체크 항목 번호: [ ${numbers} ]`
@@ -81,7 +110,7 @@ export default function App() {
     setActiveTab('final');
   };
 
-  // 점수 계산 (val이 -1인 '비해당' 옵션은 만점 및 득점에서 제외 계산)
+  // 점수 계산
   const calculateScores = () => {
     const calcGroup = (items: any[]) => {
       let totalMax = 0;
@@ -91,7 +120,7 @@ export default function App() {
         const selectedVal = scores[item.id];
         if (selectedVal !== undefined) {
           if (selectedVal === -1) {
-            // 비해당(-) 선택 시 총점에서 제외
+            // 비해당(-) 선택 시 총점 및 최대 점수에서 제외
           } else {
             totalMax += (item.maxScore || 0);
             totalCurrent += selectedVal;
@@ -121,15 +150,13 @@ export default function App() {
   };
 
   const handleReset = () => {
-    if (confirm(isEn ? 'Reset all evaluation content?' : '평가 내용을 전체 초기화하시겠습니까?')) {
-      setScores({});
-      setPhotos({});
-      setBranchName('');
-      setInspectorName('');
-      if (managerSigRef.current?.clear) managerSigRef.current.clear();
-      if (ownerSigRef.current?.clear) ownerSigRef.current.clear();
-      setActiveTab('hall');
-    }
+    setScores({});
+    setPhotos({});
+    setBranchName('');
+    setInspectorName('');
+    if (managerSigRef.current?.clear) managerSigRef.current.clear();
+    if (ownerSigRef.current?.clear) ownerSigRef.current.clear();
+    setActiveTab('hall');
   };
 
   const handlePhotoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -153,6 +180,7 @@ export default function App() {
     });
   };
 
+  // DB 제출
   const handleSubmit = async () => {
     if (!validateBasicInfo()) return;
     setIsSubmitting(true);
@@ -192,6 +220,7 @@ export default function App() {
 
       alert(isEn ? '🎉 Saved to DB successfully!' : '🎉 성공적으로 Supabase DB에 저장되었습니다!');
       handleReset();
+      setActiveTab('library');
     } catch (err: any) {
       console.error(err);
       alert(`⚠️ Error: ${err.message || 'Unknown error'}`);
@@ -200,7 +229,12 @@ export default function App() {
     }
   };
 
-  // Section 및 subCategory 기준으로 항목 그룹화 렌더링
+  // PDF 출력
+  const handlePrintPDF = () => {
+    window.print();
+  };
+
+  // 그룹화 렌더링
   const renderItemGroups = (items: any[]) => {
     const categories: { [key: string]: { [key: string]: any[] } } = {};
     
@@ -228,7 +262,7 @@ export default function App() {
               </h4>
 
               <div className="space-y-3">
-                {itemList.map((item, idx) => {
+                {itemList.map((item) => {
                   const taskText = isEn ? item.taskEn : item.task;
                   const itemPhotos = photos[item.id] || [];
 
@@ -236,12 +270,11 @@ export default function App() {
                     <div key={item.id} className="p-3.5 bg-slate-50/60 rounded-lg border border-slate-200 flex flex-col md:flex-row md:items-center justify-between gap-3">
                       <div className="flex-1">
                         <p className="text-sm font-medium text-slate-800">
-                          <span className="font-bold mr-1">{idx + 1}.</span> {taskText}
+                          <span className="font-bold mr-1">{item.globalIndex}.</span> {taskText}
                         </p>
                       </div>
 
                       <div className="flex items-center gap-2 flex-wrap justify-end">
-                        {/* 평가 옵션 버튼 */}
                         <div className="flex items-center gap-1 bg-white p-1 rounded-lg border border-slate-200">
                           {item.options.map((opt: any) => {
                             const val = opt.val;
@@ -263,7 +296,6 @@ export default function App() {
                           })}
                         </div>
 
-                        {/* 사진 첨부 버튼 */}
                         <button
                           onClick={() => setActivePhotoModalItem(item)}
                           className={`flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg border transition-all ${
@@ -290,7 +322,7 @@ export default function App() {
   return (
     <div className="min-h-screen bg-slate-50 text-slate-800 pb-28">
       {/* 상단 헤더 */}
-      <header className="bg-white border-b border-slate-200 sticky top-0 z-30 shadow-sm">
+      <header className="bg-white border-b border-slate-200 sticky top-0 z-30 shadow-sm print:hidden">
         <div className="max-w-7xl mx-auto px-4 py-3 flex flex-wrap items-center justify-between gap-4">
           <div className="flex items-center gap-2">
             <ShieldCheck className="w-7 h-7 text-blue-600" />
@@ -300,7 +332,6 @@ export default function App() {
           </div>
 
           <div className="flex items-center gap-3 flex-wrap">
-            {/* 한/영 토글 버튼 */}
             <button
               onClick={() => setLang(l => l === 'ko' ? 'en' : 'ko')}
               className="flex items-center gap-1.5 bg-blue-50 text-blue-700 px-3 py-1.5 rounded-lg text-xs font-bold border border-blue-200 hover:bg-blue-100 transition-all"
@@ -366,6 +397,14 @@ export default function App() {
             }`}
           >
             {isEn ? 'Final & Signature' : '최종 평가 및 서명'}
+          </button>
+          <button
+            onClick={() => setActiveTab('library')}
+            className={`flex-1 py-3 text-sm font-semibold flex items-center justify-center gap-2 border-b-2 transition-all ${
+              activeTab === 'library' ? 'border-indigo-600 text-indigo-600 bg-indigo-50/50' : 'border-transparent text-slate-500'
+            }`}
+          >
+            <FolderArchive className="w-4 h-4" /> {isEn ? 'Library' : '보관함'}
           </button>
         </div>
       </header>
@@ -452,10 +491,72 @@ export default function App() {
             </button>
           </div>
         )}
+
+        {/* 보관함(Library) 탭 */}
+        {activeTab === 'library' && (
+          <div className="max-w-5xl mx-auto space-y-4">
+            <div className="flex items-center justify-between">
+              <h2 className="text-lg font-bold text-slate-800 flex items-center gap-2">
+                <FolderArchive className="w-5 h-5 text-indigo-600" />
+                {isEn ? 'Evaluation Result Library' : '평가 결과 보관함'}
+              </h2>
+              <button
+                onClick={fetchLibrary}
+                className="text-xs bg-white border border-slate-200 px-3 py-1.5 rounded-lg text-slate-600 hover:bg-slate-50 flex items-center gap-1"
+              >
+                <RefreshCw className="w-3.5 h-3.5" /> 새로고침
+              </button>
+            </div>
+
+            {isLoadingLibrary ? (
+              <div className="p-12 text-center text-slate-500">목록을 불러오는 중입니다...</div>
+            ) : savedInspections.length === 0 ? (
+              <div className="p-12 bg-white rounded-2xl border border-slate-200 text-center text-slate-400">
+                저장된 점검 결과가 없습니다.
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {savedInspections.map((item) => (
+                  <div key={item.id} className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm hover:shadow-md transition-all">
+                    <div className="flex items-start justify-between border-b border-slate-100 pb-3 mb-3">
+                      <div>
+                        <span className="text-xs font-bold px-2 py-0.5 bg-blue-50 text-blue-600 rounded">
+                          {item.branch_name || '지점 미지정'}
+                        </span>
+                        <h3 className="font-bold text-slate-800 text-base mt-1">
+                          {item.inspection_date} 점검
+                        </h3>
+                        <p className="text-xs text-slate-500 mt-0.5">점검자: {item.inspector_name}</p>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-xl font-black text-blue-600">{item.final_score}점</p>
+                        <span className="text-xs font-bold px-2 py-0.5 bg-emerald-100 text-emerald-700 rounded">
+                          Grade {item.final_grade}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center justify-between pt-1">
+                      <div className="text-xs text-slate-500">
+                        홀 {item.hall_score}점 | 주방 {item.kitchen_score}점
+                      </div>
+                      <button
+                        onClick={() => setSelectedInspection(item)}
+                        className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-bold text-xs flex items-center gap-1"
+                      >
+                        <Eye className="w-3.5 h-3.5" /> 결과지 상세보기 / PDF
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
       </main>
 
       {/* 하단 액션 바 */}
-      <footer className="fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 p-3 z-20 shadow-lg">
+      <footer className="fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 p-3 z-20 shadow-lg print:hidden">
         <div className="max-w-7xl mx-auto flex items-center justify-between gap-4">
           <div className="flex items-center gap-3">
             <span className="inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 bg-emerald-50 text-emerald-600 rounded-full border border-emerald-200">
@@ -470,10 +571,6 @@ export default function App() {
           </div>
 
           <div className="flex items-center gap-2">
-            <button className="hidden sm:flex items-center gap-1 text-xs px-3 py-2 border border-slate-200 rounded-lg text-slate-600">
-              <Save className="w-3.5 h-3.5" /> {isEn ? 'Temp Save' : '임시 저장'}
-            </button>
-
             {activeTab === 'hall' && (
               <button
                 onClick={handleHallComplete}
@@ -550,6 +647,72 @@ export default function App() {
             >
               {isEn ? 'Close' : '닫기'}
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* 보관함 상세보기 및 PDF 인쇄 팝업 모달 */}
+      {selectedInspection && (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-white rounded-2xl max-w-2xl w-full p-6 shadow-2xl relative my-8">
+            <div className="flex items-center justify-between pb-4 border-b border-slate-200 print:hidden">
+              <h3 className="font-bold text-slate-800 text-lg">점검 리포트 상세</h3>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={handlePrintPDF}
+                  className="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold px-3 py-1.5 rounded-lg flex items-center gap-1"
+                >
+                  <Printer className="w-3.5 h-3.5" /> PDF 저장 / 인쇄
+                </button>
+                <button onClick={() => setSelectedInspection(null)} className="text-slate-400 hover:text-slate-600">
+                  <X className="w-6 h-6" />
+                </button>
+              </div>
+            </div>
+
+            {/* 인쇄 대상 영역 */}
+            <div className="py-6 space-y-6">
+              <div className="text-center border-b pb-4">
+                <h2 className="text-2xl font-black text-slate-900">QSC 점검 평가 리포트</h2>
+                <p className="text-sm text-slate-500 mt-1">점검 일자: {selectedInspection.inspection_date}</p>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4 bg-slate-50 p-4 rounded-xl text-sm">
+                <div><span className="font-bold">지점명:</span> {selectedInspection.branch_name}</div>
+                <div><span className="font-bold">점검자:</span> {selectedInspection.inspector_name}</div>
+              </div>
+
+              <div className="grid grid-cols-3 gap-2 text-center bg-blue-50/50 p-4 rounded-xl border border-blue-100">
+                <div>
+                  <p className="text-xs font-bold text-slate-500">홀 점수</p>
+                  <p className="text-lg font-black">{selectedInspection.hall_score}점 ({selectedInspection.hall_grade})</p>
+                </div>
+                <div>
+                  <p className="text-xs font-bold text-slate-500">주방 점수</p>
+                  <p className="text-lg font-black">{selectedInspection.kitchen_score}점 ({selectedInspection.kitchen_grade})</p>
+                </div>
+                <div>
+                  <p className="text-xs font-bold text-slate-500">최종 점수</p>
+                  <p className="text-lg font-black text-blue-600">{selectedInspection.final_score}점 ({selectedInspection.final_grade})</p>
+                </div>
+              </div>
+
+              {/* 서명 내역 */}
+              <div className="grid grid-cols-2 gap-4 pt-4 border-t border-slate-200">
+                <div className="text-center">
+                  <p className="text-xs font-bold text-slate-600 mb-2">점검자 서명</p>
+                  {selectedInspection.manager_signature ? (
+                    <img src={selectedInspection.manager_signature} alt="점검자 서명" className="h-20 mx-auto object-contain border rounded bg-slate-50" />
+                  ) : <span className="text-xs text-slate-400">서명 없음</span>}
+                </div>
+                <div className="text-center">
+                  <p className="text-xs font-bold text-slate-600 mb-2">점주/매니저 서명</p>
+                  {selectedInspection.owner_signature ? (
+                    <img src={selectedInspection.owner_signature} alt="점주 서명" className="h-20 mx-auto object-contain border rounded bg-slate-50" />
+                  ) : <span className="text-xs text-slate-400">서명 없음</span>}
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       )}
