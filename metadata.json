@@ -1,0 +1,8 @@
+{
+  "name": "Restaurant Inspection Checklist",
+  "description": "A digital checklist for restaurant inspections (Bornga, Saemaeul Sikdang) with scoring, signature, and PDF export features.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
