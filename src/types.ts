@@ -1,11 +1,13 @@
 export interface ScoreOption {
   label: string;
-  labelEn?: string; // 🔥 labelEn 속성 허용 추가!
+  labelEn?: string;
   score: number;
+  val?: number; // 🔥 data.ts에 들어있는 'val' 속성 허용!
+  [key: string]: any; // 기타 유연한 데이터 속성 허용
 }
 
 export interface InspectionItem {
-  id: number;
+  id: number | string; // 🔥 문자열 id(ex: "3521")도 받아들일 수 있도록 수정!
   category: string;
   categoryEn?: string;
   subcategory?: string;
@@ -14,6 +16,7 @@ export interface InspectionItem {
   titleEn?: string;
   options: ScoreOption[];
   maxScore: number;
+  [key: string]: any;
 }
 
 export interface InspectionResult {
@@ -31,6 +34,6 @@ export interface InspectionResult {
   final_grade: string;
   manager_signature?: string;
   owner_signature?: string;
-  details: Record<number, number>;
-  evidence_photos?: Record<number, string[]>;
+  details: Record<string | number, number>;
+  evidence_photos?: Record<string | number, string[]>;
 }
