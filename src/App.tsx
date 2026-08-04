@@ -129,7 +129,7 @@ export default function App() {
         const selectedVal = scores[item.id];
         if (selectedVal !== undefined) {
           if (selectedVal === -1) {
-            // 비해당
+            // 비해당 제외
           } else {
             totalMax += (item.maxScore || 0);
             totalCurrent += selectedVal;
@@ -168,7 +168,6 @@ export default function App() {
     setActiveTab('hall');
   };
 
-  // 사진 업로드 초경량화 (300px, 30% 화질 압축)
   const handlePhotoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!activePhotoModalItem || !e.target.files) return;
     const files = Array.from(e.target.files);
@@ -217,7 +216,6 @@ export default function App() {
     });
   };
 
-  // DB 제출 (오류 디버깅 강화)
   const handleSubmit = async () => {
     if (!validateBasicInfo()) return;
     setIsSubmitting(true);
@@ -252,12 +250,9 @@ export default function App() {
         language: lang
       };
 
-      console.log('Sending payload to Supabase:', payload);
-
       const { data, error } = await supabase.from('inspections').insert([payload]).select();
 
       if (error) {
-        console.error('Supabase DB Insert Error Object:', error);
         throw error;
       }
 
@@ -266,7 +261,7 @@ export default function App() {
       setActiveTab('library');
     } catch (err: any) {
       console.error('Submit Error Catch:', err);
-      alert(`⚠️ Supabase DB 저장 실패: ${err.message || '네트워크 통신 오류가 발생했습니다.'}\n(F12 개발자 도구 콘솔의 상세 에러를 확인해 주세요)`);
+      alert(`⚠️ Supabase DB 저장 실패: ${err.message || '네트워크 통신 오류가 발생했습니다.'}`);
     } finally {
       setIsSubmitting(false);
     }
