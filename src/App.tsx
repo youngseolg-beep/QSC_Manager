@@ -33,7 +33,7 @@ export default function App() {
 
   const isEn = lang === 'en';
 
-  // 테스트용 더미 데이터 자동 채우기
+  // 더미 데이터 채우기
   const fillDummyData = () => {
     setBranchName('강남 직영점(테스트)');
     setInspectorName('홍길동 매니저');
@@ -48,12 +48,25 @@ export default function App() {
     alert('⚡ 모든 항목이 [우수/준수]로 자동 채워졌습니다!');
   };
 
-  // 보관함 불러오기 (로컬 우선)
-  const fetchLibrary = () => {
+  // 🔥 Supabase DB에서 보관함 목록 불러오기 (메인)
+  const fetchLibrary = async () => {
     setIsLoadingLibrary(true);
-    const localData = JSON.parse(localStorage.getItem('qsc_inspections') || '[]');
-    setSavedInspections(localData);
-    setIsLoadingLibrary(false);
+    try {
+      const { data, error } = await supabase
+        .from('inspections')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (error) {
+        throw error;
+      }
+      setSavedInspections(data || []);
+    } catch (err: any) {
+      console.error('Supabase fetch error:', err);
+      alert(`⚠️ Supabase 불러오기 실패: ${err.message || '네트워크 문제'}`);
+    } finally {
+      setIsLoadingLibrary(false);
+    }
   };
 
   useEffect(() => {
@@ -157,28 +170,55 @@ export default function App() {
     setActiveTab('hall');
   };
 
+  // 이미지 업로드 시 캔버스 압축 처리 (Supabase 패킷 한도 방지)
   const handlePhotoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!activePhotoModalItem || !e.target.files) return;
     const files = Array.from(e.target.files);
     
     files.forEach(file => {
+      const img = new Image();
       const reader = new FileReader();
       reader.onloadend = () => {
-        const base64 = reader.result as string;
-        setPhotos(prev => {
-          const current = prev[activePhotoModalItem.id] || [];
-          if (current.length >= 3) {
-            alert('Max 3 photos allowed.');
-            return prev;
+        img.src = reader.result as string;
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          const ctx = canvas.getContext('2d');
+          const maxDim = 800; // 가로/세로 최대 800px로 리사이징
+          let width = img.width;
+          let height = img.height;
+
+          if (width > height) {
+            if (width > maxDim) {
+              height *= maxDim / width;
+              width = maxDim;
+            }
+          } else {
+            if (height > maxDim) {
+              width *= maxDim / height;
+              height = maxDim;
+            }
           }
-          return { ...prev, [activePhotoModalItem.id]: [...current, base64] };
-        });
+
+          canvas.width = width;
+          canvas.height = height;
+          ctx?.drawImage(img, 0, 0, width, height);
+          const compressedBase64 = canvas.toDataURL('image/jpeg', 0.6); // 60% 압축
+
+          setPhotos(prev => {
+            const current = prev[activePhotoModalItem.id] || [];
+            if (current.length >= 3) {
+              alert('Max 3 photos allowed.');
+              return prev;
+            }
+            return { ...prev, [activePhotoModalItem.id]: [...current, compressedBase64] };
+          });
+        };
       };
       reader.readAsDataURL(file);
     });
   };
 
-  // 저장 함수
+  // 🔥 Supabase DB 저장 (메인)
   const handleSubmit = async () => {
     if (!validateBasicInfo()) return;
     setIsSubmitting(true);
@@ -187,19 +227,17 @@ export default function App() {
       let managerSig = '';
       let ownerSig = '';
 
+      // 서명 캔버스 이미지 경량화 압축
       if (managerSigRef.current && typeof managerSigRef.current.isEmpty === 'function' && !managerSigRef.current.isEmpty()) {
-        managerSig = managerSigRef.current.getCanvas().toDataURL('image/png');
+        managerSig = managerSigRef.current.getCanvas().toDataURL('image/jpeg', 0.5);
       }
       if (ownerSigRef.current && typeof ownerSigRef.current.isEmpty === 'function' && !ownerSigRef.current.isEmpty()) {
-        ownerSig = ownerSigRef.current.getCanvas().toDataURL('image/png');
+        ownerSig = ownerSigRef.current.getCanvas().toDataURL('image/jpeg', 0.5);
       }
 
       const calculated = calculateScores();
-      const recordId = 'insp_' + Date.now();
 
       const payload = {
-        id: recordId,
-        created_at: new Date().toISOString(),
         inspection_date: inspectionDate,
         branch_name: branchName,
         inspector_name: inspectorName,
@@ -216,23 +254,18 @@ export default function App() {
         language: lang
       };
 
-      // 1. 로컬스토리지 즉시 저장
-      const existingLocal = JSON.parse(localStorage.getItem('qsc_inspections') || '[]');
-      localStorage.setItem('qsc_inspections', JSON.stringify([payload, ...existingLocal]));
+      const { data, error } = await supabase.from('inspections').insert([payload]).select();
 
-      // 2. Supabase 백그라운드 전송 시도
-      try {
-        await supabase.from('inspections').insert([payload]);
-      } catch (e) {
-        console.warn('Supabase DB Sync Skipped');
+      if (error) {
+        throw error;
       }
 
-      alert(isEn ? '🎉 Saved successfully!' : '🎉 평가 결과가 성공적으로 저장되었습니다!');
+      alert(isEn ? '🎉 Saved to Supabase DB successfully!' : '🎉 성공적으로 Supabase DB에 저장되었습니다!');
       handleReset();
       setActiveTab('library');
     } catch (err: any) {
-      console.error(err);
-      alert(`⚠️ 저장 에러: ${err.message || '알 수 없는 오류'}`);
+      console.error('Supabase Submit Error:', err);
+      alert(`⚠️ Supabase DB 저장 실패: ${err.message || '네트워크 통신 오류'}`);
     } finally {
       setIsSubmitting(false);
     }
@@ -326,7 +359,6 @@ export default function App() {
     ));
   };
 
-  // 📄 상세보기 리포트 내 전체 문항 렌더링 함수
   const renderDetailReportItems = (details: Record<string, number>, photoData: Record<string, string[]>) => {
     return CHECKLIST_ITEMS.map((item, idx) => {
       const val = details ? details[item.id] : undefined;
@@ -358,7 +390,6 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-800 pb-28">
-      {/* 상단 헤더 */}
       <header className="bg-white border-b border-slate-200 sticky top-0 z-30 shadow-sm print:hidden">
         <div className="max-w-7xl mx-auto px-4 py-3 flex flex-wrap items-center justify-between gap-4">
           <div className="flex items-center gap-2">
@@ -417,7 +448,6 @@ export default function App() {
           </div>
         </div>
 
-        {/* 탭 네비게이션 */}
         <div className="max-w-7xl mx-auto px-4 flex border-t border-slate-100">
           <button
             onClick={() => setActiveTab('hall')}
@@ -454,7 +484,6 @@ export default function App() {
         </div>
       </header>
 
-      {/* 메인 콘텐츠 */}
       <main className="max-w-7xl mx-auto px-4 py-6">
         {activeTab === 'hall' && (
           <div>
@@ -543,7 +572,7 @@ export default function App() {
             <div className="flex items-center justify-between">
               <h2 className="text-lg font-bold text-slate-800 flex items-center gap-2">
                 <FolderArchive className="w-5 h-5 text-indigo-600" />
-                {isEn ? 'Evaluation Result Library' : '평가 결과 보관함'}
+                {isEn ? 'Evaluation Result Library' : '평가 결과 보관함 (Supabase DB)'}
               </h2>
               <button
                 onClick={fetchLibrary}
@@ -554,7 +583,7 @@ export default function App() {
             </div>
 
             {isLoadingLibrary ? (
-              <div className="p-12 text-center text-slate-500">목록을 불러오는 중입니다...</div>
+              <div className="p-12 text-center text-slate-500">Supabase DB에서 목록을 불러오는 중입니다...</div>
             ) : savedInspections.length === 0 ? (
               <div className="p-12 bg-white rounded-2xl border border-slate-200 text-center text-slate-400">
                 저장된 점검 결과가 없습니다.
@@ -604,7 +633,7 @@ export default function App() {
         <div className="max-w-7xl mx-auto flex items-center justify-between gap-4">
           <div className="flex items-center gap-3">
             <span className="inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 bg-emerald-50 text-emerald-600 rounded-full border border-emerald-200">
-              <span className="w-2 h-2 rounded-full bg-emerald-500"></span> READY
+              <span className="w-2 h-2 rounded-full bg-emerald-500"></span> DB READY
             </span>
             <button
               onClick={handleReset}
@@ -694,7 +723,6 @@ export default function App() {
         </div>
       )}
 
-      {/* 📄 상세보기 & PDF 인쇄 종합 리포트 모달 (전체 문항 내역 포함) */}
       {selectedInspection && (
         <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 overflow-y-auto">
           <div className="bg-white rounded-2xl max-w-4xl w-full p-6 shadow-2xl relative my-8 max-h-[90vh] overflow-y-auto">
@@ -713,7 +741,6 @@ export default function App() {
               </div>
             </div>
 
-            {/* 실제 인쇄 출력 영역 */}
             <div className="py-6 space-y-6">
               <div className="text-center border-b pb-4">
                 <h2 className="text-2xl font-black text-slate-900">QSC 점검 종합 평가 리포트</h2>
@@ -740,7 +767,6 @@ export default function App() {
                 </div>
               </div>
 
-              {/* 📋 전체 점검 문항 개별 내역 표 */}
               <div className="space-y-2">
                 <h4 className="text-sm font-bold text-slate-800 flex items-center gap-1.5">
                   <span className="w-2 h-2 rounded-full bg-blue-600"></span> 세부 점검 항목 평가 내역
@@ -763,7 +789,6 @@ export default function App() {
                 </div>
               </div>
 
-              {/* ✍️ 서명 내역 */}
               <div className="grid grid-cols-2 gap-4 pt-4 border-t border-slate-200">
                 <div className="text-center">
                   <p className="text-xs font-bold text-slate-600 mb-2">점검자 서명</p>
