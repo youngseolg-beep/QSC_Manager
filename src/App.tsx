@@ -1,17 +1,36 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { 
   Building2, User, Calendar, CheckCircle2, 
-  RotateCcw, Send, ShieldCheck, ChevronRight 
+  RotateCcw, Send, ShieldCheck, ChevronRight, Camera, X, RefreshCw, Save
 } from 'lucide-react';
 import SignatureCanvas from 'react-signature-canvas';
 
-// data.ts의 모든 내보내기 객체를 한 번에 가져와서 자동 처리
+// data.ts의 모든 데이터 유연하게 가져오기
 import * as DataModule from './data';
 import { supabase } from './utils/supabase';
 
-// HALL / KITCHEN 아이템 배열 자동 추출 (이름이 달라도 다 찾아냄)
-const HALL_ITEMS: any[] = DataModule.HALL_ITEMS || DataModule.hallItems || DataModule.hall_items || DataModule.items || [];
-const KITCHEN_ITEMS: any[] = DataModule.KITCHEN_ITEMS || DataModule.kitchenItems || DataModule.kitchen_items || [];
+// 데이터 자동 추출 (어떤 형태로 export 되어있든 100% 추출)
+const rawData: any = DataModule.default || DataModule;
+const allExportedArrays = Object.values(DataModule).filter(v => Array.isArray(v)) as any[][];
+const combinedItems = allExportedArrays.flat();
+
+let HALL_ITEMS: any[] = DataModule.HALL_ITEMS || DataModule.hallItems || DataModule.hall_items || [];
+let KITCHEN_ITEMS: any[] = DataModule.KITCHEN_ITEMS || DataModule.kitchenItems || DataModule.kitchen_items || [];
+
+// 독립 배열이 없을 경우 전체 배열에서 자동 분리
+if (HALL_ITEMS.length === 0 && KITCHEN_ITEMS.length === 0 && combinedItems.length > 0) {
+  HALL_ITEMS = combinedItems.filter((i: any) => 
+    String(i.category || i.type || '').includes('홀') || 
+    String(i.category || i.type || '').toLowerCase().includes('hall') ||
+    (typeof i.id === 'number' && i.id <= 17)
+  );
+  KITCHEN_ITEMS = combinedItems.filter((i: any) => 
+    String(i.category || i.type || '').includes('주방') || 
+    String(i.category || i.type || '').toLowerCase().includes('kitchen') ||
+    (typeof i.id === 'number' && i.id > 17)
+  );
+  if (HALL_ITEMS.length === 0) HALL_ITEMS = combinedItems;
+}
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<'hall' | 'kitchen' | 'final'>('hall');
@@ -19,14 +38,16 @@ export default function App() {
   const [inspectorName, setInspectorName] = useState('');
   const [inspectionDate, setInspectionDate] = useState(new Date().toISOString().split('T')[0]);
   
-  const [scores, setScores] = useState<Record<string, number>>({});
-  const [photos, setPhotos] = useState<Record<string, string[]>>({});
+  const [scores, setScores] = useState<Record<string | number, number>>({});
+  const [photos, setPhotos] = useState<Record<string | number, string[]>>({});
+  const [activePhotoModalItem, setActivePhotoModalItem] = useState<any | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const managerSigRef = useRef<any>(null);
   const ownerSigRef = useRef<any>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // 미체크 항목 추출
+  // 미체크 항목 식별
   const getUncheckedItems = (items: any[]) => {
     return items.filter(item => scores[item.id] === undefined);
   };
@@ -34,6 +55,7 @@ export default function App() {
   const isHallComplete = HALL_ITEMS.length > 0 && HALL_ITEMS.every(item => scores[item.id] !== undefined);
   const isKitchenComplete = KITCHEN_ITEMS.length > 0 && KITCHEN_ITEMS.every(item => scores[item.id] !== undefined);
 
+  // 기본 정보 입력 검증
   const validateBasicInfo = () => {
     if (!branchName.trim()) {
       alert('⚠️ 지점명을 입력해 주세요.');
@@ -46,6 +68,7 @@ export default function App() {
     return true;
   };
 
+  // 홀 완료 버튼 클릭 시
   const handleHallComplete = () => {
     if (!validateBasicInfo()) return;
     const unchecked = getUncheckedItems(HALL_ITEMS);
@@ -57,6 +80,7 @@ export default function App() {
     setActiveTab('kitchen');
   };
 
+  // 주방 완료 버튼 클릭 시
   const handleKitchenComplete = () => {
     if (!validateBasicInfo()) return;
     const unchecked = getUncheckedItems(KITCHEN_ITEMS);
@@ -68,6 +92,7 @@ export default function App() {
     setActiveTab('final');
   };
 
+  // 점수 및 등급 계산
   const calculateScores = () => {
     const hallTotalMax = HALL_ITEMS.reduce((acc, item) => acc + (item.maxScore || 10), 0);
     const hallCurrent = HALL_ITEMS.reduce((acc, item) => acc + (scores[item.id] || 0), 0);
@@ -78,7 +103,6 @@ export default function App() {
     const kitchenScore = kitchenTotalMax > 0 ? (kitchenCurrent / kitchenTotalMax) * 100 : 0;
 
     const finalScore = (hallScore * 0.5) + (kitchenScore * 0.5);
-
     const getGrade = (s: number) => (s >= 90 ? 'A' : s >= 80 ? 'B' : s >= 70 ? 'C' : 'D');
 
     return {
@@ -91,19 +115,54 @@ export default function App() {
     };
   };
 
+  // 초기화
+  const handleReset = () => {
+    if (confirm('평가 내용을 전체 초기화하시겠습니까?')) {
+      setScores({});
+      setPhotos({});
+      setBranchName('');
+      setInspectorName('');
+      if (managerSigRef.current?.clear) managerSigRef.current.clear();
+      if (ownerSigRef.current?.clear) ownerSigRef.current.clear();
+      setActiveTab('hall');
+    }
+  };
+
+  // 사진 업로드
+  const handlePhotoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!activePhotoModalItem || !e.target.files) return;
+    const files = Array.from(e.target.files);
+    
+    files.forEach(file => {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        const base64 = reader.result as string;
+        setPhotos(prev => {
+          const current = prev[activePhotoModalItem.id] || [];
+          if (current.length >= 3) {
+            alert('사진은 최대 3장까지 첨부할 수 있습니다.');
+            return prev;
+          }
+          return { ...prev, [activePhotoModalItem.id]: [...current, base64] };
+        });
+      };
+      reader.readAsDataURL(file);
+    });
+  };
+
+  // DB 제출
   const handleSubmit = async () => {
     if (!validateBasicInfo()) return;
-
     setIsSubmitting(true);
 
     try {
       let managerSig = '';
       let ownerSig = '';
 
-      if (managerSigRef.current && typeof managerSigRef.current.isEmpty === 'function' && !managerSigRef.current.isEmpty()) {
+      if (managerSigRef.current && !managerSigRef.current.isEmpty()) {
         managerSig = managerSigRef.current.getCanvas().toDataURL('image/png');
       }
-      if (ownerSigRef.current && typeof ownerSigRef.current.isEmpty === 'function' && !ownerSigRef.current.isEmpty()) {
+      if (ownerSigRef.current && !ownerSigRef.current.isEmpty()) {
         ownerSig = ownerSigRef.current.getCanvas().toDataURL('image/png');
       }
 
@@ -128,24 +187,110 @@ export default function App() {
       const { error } = await supabase.from('inspections').insert([payload]);
       if (error) throw error;
 
-      alert('🎉 성공적으로 DB에 저장되었습니다!');
-      setScores({});
-      setPhotos({});
-      setBranchName('');
-      setInspectorName('');
-      if (managerSigRef.current?.clear) managerSigRef.current.clear();
-      if (ownerSigRef.current?.clear) ownerSigRef.current.clear();
-      setActiveTab('hall');
+      alert('🎉 성공적으로 Supabase DB에 저장되었습니다!');
+      handleReset();
     } catch (err: any) {
       console.error(err);
-      alert(`⚠️ 저장 중 오류: ${err.message || '알 수 없는 오류'}`);
+      alert(`⚠️ 저장 중 오류 발생: ${err.message || '알 수 없는 오류'}`);
     } finally {
       setIsSubmitting(false);
     }
   };
 
+  // 카테고리/서브카테고리별 그룹화 렌더링 함수
+  const renderItemGroups = (items: any[]) => {
+    const categories: { [key: string]: { [key: string]: any[] } } = {};
+    
+    items.forEach(item => {
+      const cat = item.category || '점검 항목';
+      const sub = item.subcategory || item.subCategory || '일반';
+      if (!categories[cat]) categories[cat] = {};
+      if (!categories[cat][sub]) categories[cat][sub] = [];
+      categories[cat][sub].push(item);
+    });
+
+    return Object.entries(categories).map(([catName, subCats]) => (
+      <div key={catName} className="mb-8 bg-white rounded-xl p-5 border border-slate-200 shadow-sm">
+        <h3 className="text-base font-bold text-slate-800 pb-3 mb-4 border-b border-slate-100 flex items-center gap-2">
+          <span className="w-2 h-2 rounded-full bg-blue-600"></span>
+          {catName}
+        </h3>
+
+        {Object.entries(subCats).map(([subName, itemList]) => {
+          const subTotalMax = itemList.reduce((sum, item) => sum + (item.maxScore || 10), 0);
+          const subTotalCurrent = itemList.reduce((sum, item) => sum + (scores[item.id] || 0), 0);
+
+          return (
+            <div key={subName} className="mb-6 last:mb-0">
+              <h4 className="text-xs font-bold text-slate-500 mb-3 bg-slate-50 px-3 py-1.5 rounded-md inline-block">
+                {subName}
+              </h4>
+
+              <div className="space-y-3">
+                {itemList.map((item) => {
+                  const itemPhotos = photos[item.id] || [];
+                  return (
+                    <div key={item.id} className="p-3 bg-slate-50/50 rounded-lg border border-slate-200 flex flex-col md:flex-row md:items-center justify-between gap-3">
+                      <div className="flex-1">
+                        <p className="text-sm font-medium text-slate-800">
+                          {item.id}. {item.title}
+                        </p>
+                      </div>
+
+                      <div className="flex items-center gap-2 flex-wrap">
+                        {/* 평가 옵션 버튼들 */}
+                        <div className="flex items-center gap-1 bg-white p-1 rounded-lg border border-slate-200">
+                          {(item.options || []).map((opt: any) => {
+                            const val = opt.score ?? opt.val ?? 0;
+                            const isSelected = scores[item.id] === val;
+                            return (
+                              <button
+                                key={opt.label}
+                                onClick={() => setScores(prev => ({ ...prev, [item.id]: val }))}
+                                className={`px-2.5 py-1 text-xs font-semibold rounded transition-all ${
+                                  isSelected 
+                                    ? 'bg-blue-600 text-white shadow-sm' 
+                                    : 'text-slate-600 hover:bg-slate-100'
+                                }`}
+                              >
+                                {opt.label}({val})
+                              </button>
+                            );
+                          })}
+                        </div>
+
+                        {/* 사진 첨부 버튼 */}
+                        <button
+                          onClick={() => setActivePhotoModalItem(item)}
+                          className={`flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg border transition-all ${
+                            itemPhotos.length > 0 
+                              ? 'bg-indigo-50 border-indigo-200 text-indigo-600 font-bold' 
+                              : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-50'
+                          }`}
+                        >
+                          <Camera className="w-3.5 h-3.5" />
+                          <span>0/{itemPhotos.length > 0 ? itemPhotos.length : 3}</span>
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* 소계 점수 표시 */}
+              <div className="text-right mt-2 text-xs text-slate-500 font-medium">
+                소계 <span className="font-bold text-slate-700">{subTotalCurrent}</span> / {subTotalMax}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    ));
+  };
+
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-800 pb-20">
+    <div className="min-h-screen bg-slate-50 text-slate-800 pb-28">
+      {/* 상단 헤더 */}
       <header className="bg-white border-b border-slate-200 sticky top-0 z-30 shadow-sm">
         <div className="max-w-7xl mx-auto px-4 py-3 flex flex-wrap items-center justify-between gap-4">
           <div className="flex items-center gap-2">
@@ -188,6 +333,7 @@ export default function App() {
           </div>
         </div>
 
+        {/* 탭 메뉴 */}
         <div className="max-w-7xl mx-auto px-4 flex border-t border-slate-100">
           <button
             onClick={() => setActiveTab('hall')}
@@ -216,97 +362,31 @@ export default function App() {
         </div>
       </header>
 
+      {/* 메인 콘텐츠 */}
       <main className="max-w-7xl mx-auto px-4 py-6">
+        {/* 홀 점검 탭 */}
         {activeTab === 'hall' && (
-          <div className="space-y-4">
-            <h2 className="text-lg font-bold text-slate-800">홀 (Hall) 점검 항목</h2>
-            {HALL_ITEMS.map((item: any) => (
-              <div key={item.id} className="bg-white p-4 rounded-xl shadow-sm border border-slate-200">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                  <div>
-                    <span className="text-xs font-semibold px-2 py-0.5 bg-slate-100 text-slate-600 rounded">
-                      {item.id}번 항목
-                    </span>
-                    <p className="font-medium text-slate-800 mt-1">{item.title}</p>
-                  </div>
-                  <div className="flex items-center gap-1.5 flex-wrap">
-                    {(item.options || []).map((opt: any) => (
-                      <button
-                        key={opt.label}
-                        onClick={() => setScores((prev) => ({ ...prev, [item.id]: opt.score ?? opt.val ?? 0 }))}
-                        className={`px-3 py-1.5 text-xs font-semibold rounded-lg border transition-all ${
-                          scores[item.id] === (opt.score ?? opt.val ?? 0)
-                            ? 'bg-blue-600 text-white border-blue-600 shadow-sm'
-                            : 'bg-white text-slate-600 border-slate-200'
-                        }`}
-                      >
-                        {opt.label}({opt.score ?? opt.val ?? 0})
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            ))}
-
-            <div className="pt-4 flex justify-end">
-              <button
-                onClick={handleHallComplete}
-                className={`px-6 py-3 rounded-xl font-bold text-white shadow-lg transition-all flex items-center gap-2 ${
-                  isHallComplete ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-red-500 hover:bg-red-600'
-                }`}
-              >
-                {isHallComplete ? '홀 점검 완료 (다음 단계)' : '홀 점검 항목 완료 필요'}
-                <ChevronRight className="w-5 h-5" />
-              </button>
+          <div>
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-bold text-slate-800">홀 (Hall) 점검 항목</h2>
+              <span className="text-xs font-bold px-2 py-1 bg-slate-200 text-slate-600 rounded">WEIGHT 50%</span>
             </div>
+            {renderItemGroups(HALL_ITEMS)}
           </div>
         )}
 
+        {/* 주방 점검 탭 */}
         {activeTab === 'kitchen' && (
-          <div className="space-y-4">
-            <h2 className="text-lg font-bold text-slate-800">주방 (Kitchen) 점검 항목</h2>
-            {KITCHEN_ITEMS.map((item: any) => (
-              <div key={item.id} className="bg-white p-4 rounded-xl shadow-sm border border-slate-200">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                  <div>
-                    <span className="text-xs font-semibold px-2 py-0.5 bg-slate-100 text-slate-600 rounded">
-                      {item.id}번 항목
-                    </span>
-                    <p className="font-medium text-slate-800 mt-1">{item.title}</p>
-                  </div>
-                  <div className="flex items-center gap-1.5 flex-wrap">
-                    {(item.options || []).map((opt: any) => (
-                      <button
-                        key={opt.label}
-                        onClick={() => setScores((prev) => ({ ...prev, [item.id]: opt.score ?? opt.val ?? 0 }))}
-                        className={`px-3 py-1.5 text-xs font-semibold rounded-lg border transition-all ${
-                          scores[item.id] === (opt.score ?? opt.val ?? 0)
-                            ? 'bg-blue-600 text-white border-blue-600 shadow-sm'
-                            : 'bg-white text-slate-600 border-slate-200'
-                        }`}
-                      >
-                        {opt.label}({opt.score ?? opt.val ?? 0})
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            ))}
-
-            <div className="pt-4 flex justify-end">
-              <button
-                onClick={handleKitchenComplete}
-                className={`px-6 py-3 rounded-xl font-bold text-white shadow-lg transition-all flex items-center gap-2 ${
-                  isKitchenComplete ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-red-500 hover:bg-red-600'
-                }`}
-              >
-                {isKitchenComplete ? '주방 점검 완료 (최종 서명)' : '주방 점검 항목 완료 필요'}
-                <ChevronRight className="w-5 h-5" />
-              </button>
+          <div>
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-bold text-slate-800">주방 (Kitchen) 점검 항목</h2>
+              <span className="text-xs font-bold px-2 py-1 bg-slate-200 text-slate-600 rounded">WEIGHT 50%</span>
             </div>
+            {renderItemGroups(KITCHEN_ITEMS)}
           </div>
         )}
 
+        {/* 최종 서명 탭 */}
         {activeTab === 'final' && (
           <div className="space-y-6 max-w-3xl mx-auto">
             <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 grid grid-cols-3 gap-4 text-center">
@@ -365,6 +445,102 @@ export default function App() {
           </div>
         )}
       </main>
+
+      {/* 하단 고정 액션 바 */}
+      <footer className="fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 p-3 z-20 shadow-lg">
+        <div className="max-w-7xl mx-auto flex items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <span className="inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 bg-emerald-50 text-emerald-600 rounded-full border border-emerald-200">
+              <span className="w-2 h-2 rounded-full bg-emerald-500"></span> DB READY
+            </span>
+            <button
+              onClick={handleReset}
+              className="flex items-center gap-1 text-xs text-slate-500 hover:text-slate-800 px-2 py-1 rounded border border-slate-200"
+            >
+              <RefreshCw className="w-3 h-3" /> 평가 초기화
+            </button>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <button className="hidden sm:flex items-center gap-1 text-xs px-3 py-2 border border-slate-200 rounded-lg text-slate-600">
+              <Save className="w-3.5 h-3.5" /> 임시 저장
+            </button>
+
+            {activeTab === 'hall' && (
+              <button
+                onClick={handleHallComplete}
+                className={`px-5 py-2.5 rounded-xl font-bold text-white text-sm shadow flex items-center gap-1.5 transition-all ${
+                  isHallComplete ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-red-500 hover:bg-red-600'
+                }`}
+              >
+                {isHallComplete ? '홀 점검 완료 (다음 단계)' : '홀 점검 항목 완료 필요'}
+                <ChevronRight className="w-4 h-4" />
+              </button>
+            )}
+
+            {activeTab === 'kitchen' && (
+              <button
+                onClick={handleKitchenComplete}
+                className={`px-5 py-2.5 rounded-xl font-bold text-white text-sm shadow flex items-center gap-1.5 transition-all ${
+                  isKitchenComplete ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-red-500 hover:bg-red-600'
+                }`}
+              >
+                {isKitchenComplete ? '주방 점검 완료 (최종 서명)' : '주방 점검 항목 완료 필요'}
+                <ChevronRight className="w-4 h-4" />
+              </button>
+            )}
+          </div>
+        </div>
+      </footer>
+
+      {/* 사진 첨부 모달 팝업 */}
+      {activePhotoModalItem && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl p-5 max-w-md w-full shadow-2xl">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+              <h3 className="font-bold text-slate-800 text-sm">
+                사진 첨부 ({activePhotoModalItem.id}. {activePhotoModalItem.title})
+              </h3>
+              <button onClick={() => setActivePhotoModalItem(null)} className="text-slate-400 hover:text-slate-600">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="py-4">
+              <div className="grid grid-cols-3 gap-2 mb-3">
+                {(photos[activePhotoModalItem.id] || []).map((img, idx) => (
+                  <div key={idx} className="relative aspect-square rounded-lg overflow-hidden border border-slate-200">
+                    <img src={img} alt="증빙" className="w-full h-full object-cover" />
+                  </div>
+                ))}
+              </div>
+
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                multiple
+                onChange={handlePhotoUpload}
+                className="hidden"
+              />
+
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                className="w-full py-2.5 border-2 border-dashed border-slate-200 rounded-xl text-xs font-bold text-slate-600 flex items-center justify-center gap-1.5 hover:border-blue-500 hover:text-blue-600 transition-all"
+              >
+                <Camera className="w-4 h-4" /> 사진 직접 촬영 또는 앨범 선택
+              </button>
+            </div>
+
+            <button
+              onClick={() => setActivePhotoModalItem(null)}
+              className="w-full py-2.5 bg-slate-800 text-white font-bold rounded-xl text-xs"
+            >
+              닫기
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
