@@ -1,14 +1,14 @@
 import React, { useState, useRef } from 'react';
 import { 
   Building2, User, Calendar, CheckCircle2, 
-  RotateCcw, Send, ShieldCheck, ChevronRight, Camera, X, RefreshCw, Save
+  RotateCcw, Send, ShieldCheck, ChevronRight, Camera, X, RefreshCw, Save, Globe
 } from 'lucide-react';
 import SignatureCanvas from 'react-signature-canvas';
 
 import * as DataModule from './data';
 import { supabase } from './utils/supabase';
 
-// 데이터 추출 및 매핑
+// 데이터 자동 추출
 const allArrays = Object.values(DataModule).filter(v => Array.isArray(v)) as any[][];
 const combinedItems = allArrays.flat();
 
@@ -30,6 +30,7 @@ if (HALL_ITEMS.length === 0 && KITCHEN_ITEMS.length === 0 && combinedItems.lengt
 }
 
 export default function App() {
+  const [lang, setLang] = useState<'ko' | 'en'>('ko'); // 🔥 한/영 언어 상태
   const [activeTab, setActiveTab] = useState<'hall' | 'kitchen' | 'final'>('hall');
   const [branchName, setBranchName] = useState('');
   const [inspectorName, setInspectorName] = useState('');
@@ -44,7 +45,27 @@ export default function App() {
   const ownerSigRef = useRef<any>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // 미체크 항목 추출
+  // 🔥 질문 텍스트 및 카테고리 텍스트를 깊게 파고들어서 무조건 찾아내는 헬퍼 함수
+  const getText = (item: any, isEn: boolean) => {
+    if (!item) return '';
+    if (isEn) {
+      return item.titleEn || item.nameEn || item.textEn || item.questionEn || item.title_en || item.enTitle || 
+             item.title || item.name || item.text || item.question || item.id;
+    }
+    return item.title || item.name || item.text || item.question || item.titleKr || item.title_kr || 
+           item.koTitle || item.label || item.id;
+  };
+
+  const getCatText = (item: any, field: 'cat' | 'sub', isEn: boolean) => {
+    if (field === 'cat') {
+      if (isEn) return item.categoryEn || item.category_en || item.category || 'Hygiene & Facility';
+      return item.category || item.categoryKr || item.category_kr || '위생 및 시설';
+    } else {
+      if (isEn) return item.subcategoryEn || item.subCategoryEn || item.subcategory_en || item.subcategory || 'General';
+      return item.subcategory || item.subCategory || item.subcategoryKr || item.subcategory_kr || '일반';
+    }
+  };
+
   const getUncheckedItems = (items: any[]) => {
     return items.filter(item => scores[item.id] === undefined);
   };
@@ -52,14 +73,13 @@ export default function App() {
   const isHallComplete = HALL_ITEMS.length > 0 && HALL_ITEMS.every(item => scores[item.id] !== undefined);
   const isKitchenComplete = KITCHEN_ITEMS.length > 0 && KITCHEN_ITEMS.every(item => scores[item.id] !== undefined);
 
-  // 기본 정보 입력 체크
   const validateBasicInfo = () => {
     if (!branchName.trim()) {
-      alert('⚠️ 지점명을 입력해 주세요.');
+      alert(lang === 'ko' ? '⚠️ 지점명을 입력해 주세요.' : '⚠️ Please enter the branch name.');
       return false;
     }
     if (!inspectorName.trim()) {
-      alert('⚠️ 점검자 이름을 입력해 주세요.');
+      alert(lang === 'ko' ? '⚠️ 점검자 이름을 입력해 주세요.' : '⚠️ Please enter the inspector name.');
       return false;
     }
     return true;
@@ -69,8 +89,11 @@ export default function App() {
     if (!validateBasicInfo()) return;
     const unchecked = getUncheckedItems(HALL_ITEMS);
     if (unchecked.length > 0) {
-      const numbers = unchecked.map((item, idx) => `${idx + 1}번`).join(', ');
-      alert(`⚠️ 홀 점검 미체크 항목이 있습니다.\n미체크 항목: [ ${numbers} ]`);
+      const numbers = unchecked.map((item, idx) => `${idx + 1}`).join(', ');
+      alert(lang === 'ko' 
+        ? `⚠️ 홀 점검 미체크 항목이 있습니다.\n미체크 항목 번호: [ ${numbers} ]`
+        : `⚠️ Unchecked items in Hall inspection.\nItem Nos: [ ${numbers} ]`
+      );
       return;
     }
     setActiveTab('kitchen');
@@ -80,8 +103,11 @@ export default function App() {
     if (!validateBasicInfo()) return;
     const unchecked = getUncheckedItems(KITCHEN_ITEMS);
     if (unchecked.length > 0) {
-      const numbers = unchecked.map((item, idx) => `${idx + 1}번`).join(', ');
-      alert(`⚠️ 주방 점검 미체크 항목이 있습니다.\n미체크 항목: [ ${numbers} ]`);
+      const numbers = unchecked.map((item, idx) => `${idx + 1}`).join(', ');
+      alert(lang === 'ko' 
+        ? `⚠️ 주방 점검 미체크 항목이 있습니다.\n미체크 항목 번호: [ ${numbers} ]`
+        : `⚠️ Unchecked items in Kitchen inspection.\nItem Nos: [ ${numbers} ]`
+      );
       return;
     }
     setActiveTab('final');
@@ -110,7 +136,7 @@ export default function App() {
   };
 
   const handleReset = () => {
-    if (confirm('평가 내용을 전체 초기화하시겠습니까?')) {
+    if (confirm(lang === 'ko' ? '평가 내용을 전체 초기화하시겠습니까?' : 'Reset all evaluation content?')) {
       setScores({});
       setPhotos({});
       setBranchName('');
@@ -132,7 +158,7 @@ export default function App() {
         setPhotos(prev => {
           const current = prev[activePhotoModalItem.id] || [];
           if (current.length >= 3) {
-            alert('사진은 최대 3장까지 첨부할 수 있습니다.');
+            alert('Max 3 photos.');
             return prev;
           }
           return { ...prev, [activePhotoModalItem.id]: [...current, base64] };
@@ -172,28 +198,30 @@ export default function App() {
         manager_signature: managerSig,
         owner_signature: ownerSig,
         details: scores,
-        evidence_photos: photos
+        evidence_photos: photos,
+        language: lang
       };
 
       const { error } = await supabase.from('inspections').insert([payload]);
       if (error) throw error;
 
-      alert('🎉 성공적으로 Supabase DB에 저장되었습니다!');
+      alert(lang === 'ko' ? '🎉 성공적으로 DB에 저장되었습니다!' : '🎉 Saved to DB successfully!');
       handleReset();
     } catch (err: any) {
       console.error(err);
-      alert(`⚠️ 저장 중 오류: ${err.message || '알 수 없는 오류'}`);
+      alert(`⚠️ Error: ${err.message || 'Unknown error'}`);
     } finally {
       setIsSubmitting(false);
     }
   };
 
   const renderItemGroups = (items: any[]) => {
+    const isEn = lang === 'en';
     const categories: { [key: string]: { [key: string]: any[] } } = {};
     
     items.forEach(item => {
-      const cat = item.category || item.categoryKr || '위생 및 시설';
-      const sub = item.subcategory || item.subCategory || item.subcategoryKr || '일반 점검';
+      const cat = getCatText(item, 'cat', isEn);
+      const sub = getCatText(item, 'sub', isEn);
       if (!categories[cat]) categories[cat] = {};
       if (!categories[cat][sub]) categories[cat][sub] = [];
       categories[cat][sub].push(item);
@@ -218,8 +246,7 @@ export default function App() {
 
               <div className="space-y-3">
                 {itemList.map((item, idx) => {
-                  // 💡 질문 문항 텍스트 자동 탐색 매핑
-                  const itemTitle = item.title || item.name || item.text || item.question || item.titleKr || item.label || item.id;
+                  const itemTitle = getText(item, isEn);
                   const itemPhotos = photos[item.id] || [];
 
                   return (
@@ -235,6 +262,7 @@ export default function App() {
                           {(item.options || []).map((opt: any) => {
                             const val = opt.score ?? opt.val ?? 0;
                             const isSelected = scores[item.id] === val;
+                            const optLabel = isEn ? (opt.labelEn || opt.label_en || opt.label) : opt.label;
                             return (
                               <button
                                 key={opt.label}
@@ -245,7 +273,7 @@ export default function App() {
                                     : 'text-slate-600 hover:bg-slate-100'
                                 }`}
                               >
-                                {opt.label}({val})
+                                {optLabel}({val})
                               </button>
                             );
                           })}
@@ -269,7 +297,7 @@ export default function App() {
               </div>
 
               <div className="text-right mt-2 text-xs text-slate-500 font-medium">
-                소계 <span className="font-bold text-slate-700">{subTotalCurrent}</span> / {subTotalMax}
+                {isEn ? 'Subtotal' : '소계'} <span className="font-bold text-slate-700">{subTotalCurrent}</span> / {subTotalMax}
               </div>
             </div>
           );
@@ -280,6 +308,7 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-800 pb-28">
+      {/* 상단 헤더 */}
       <header className="bg-white border-b border-slate-200 sticky top-0 z-30 shadow-sm">
         <div className="max-w-7xl mx-auto px-4 py-3 flex flex-wrap items-center justify-between gap-4">
           <div className="flex items-center gap-2">
@@ -290,11 +319,20 @@ export default function App() {
           </div>
 
           <div className="flex items-center gap-3 flex-wrap">
+            {/* 🔥 한/영 토글 버튼 복구! */}
+            <button
+              onClick={() => setLang(l => l === 'ko' ? 'en' : 'ko')}
+              className="flex items-center gap-1.5 bg-blue-50 text-blue-700 px-3 py-1.5 rounded-lg text-xs font-bold border border-blue-200 hover:bg-blue-100 transition-all"
+            >
+              <Globe className="w-3.5 h-3.5" />
+              {lang === 'ko' ? 'English' : '한국어'}
+            </button>
+
             <div className="flex items-center gap-1.5 bg-slate-100 px-3 py-1.5 rounded-lg text-sm">
               <Building2 className="w-4 h-4 text-slate-500" />
               <input
                 type="text"
-                placeholder="지점명 입력"
+                placeholder={lang === 'ko' ? "지점명 입력" : "Branch Name"}
                 value={branchName}
                 onChange={(e) => setBranchName(e.target.value)}
                 className="bg-transparent border-none outline-none w-28 font-medium placeholder:text-slate-400"
@@ -304,7 +342,7 @@ export default function App() {
               <User className="w-4 h-4 text-slate-500" />
               <input
                 type="text"
-                placeholder="점검자 이름"
+                placeholder={lang === 'ko' ? "점검자 이름" : "Inspector Name"}
                 value={inspectorName}
                 onChange={(e) => setInspectorName(e.target.value)}
                 className="bg-transparent border-none outline-none w-24 font-medium placeholder:text-slate-400"
@@ -322,6 +360,7 @@ export default function App() {
           </div>
         </div>
 
+        {/* 탭 네비게이션 */}
         <div className="max-w-7xl mx-auto px-4 flex border-t border-slate-100">
           <button
             onClick={() => setActiveTab('hall')}
@@ -329,7 +368,7 @@ export default function App() {
               activeTab === 'hall' ? 'border-blue-600 text-blue-600 bg-blue-50/50' : 'border-transparent text-slate-500'
             }`}
           >
-            홀 점검 {isHallComplete && <CheckCircle2 className="w-4 h-4 text-emerald-500" />}
+            {lang === 'ko' ? '홀 점검' : 'Hall Audit'} {isHallComplete && <CheckCircle2 className="w-4 h-4 text-emerald-500" />}
           </button>
           <button
             onClick={() => setActiveTab('kitchen')}
@@ -337,7 +376,7 @@ export default function App() {
               activeTab === 'kitchen' ? 'border-blue-600 text-blue-600 bg-blue-50/50' : 'border-transparent text-slate-500'
             }`}
           >
-            주방 점검 {isKitchenComplete && <CheckCircle2 className="w-4 h-4 text-emerald-500" />}
+            {lang === 'ko' ? '주방 점검' : 'Kitchen Audit'} {isKitchenComplete && <CheckCircle2 className="w-4 h-4 text-emerald-500" />}
           </button>
           <button
             onClick={() => setActiveTab('final')}
@@ -345,16 +384,17 @@ export default function App() {
               activeTab === 'final' ? 'border-blue-600 text-blue-600 bg-blue-50/50' : 'border-transparent text-slate-500'
             }`}
           >
-            최종 평가 및 서명
+            {lang === 'ko' ? '최종 평가 및 서명' : 'Final & Signature'}
           </button>
         </div>
       </header>
 
+      {/* 메인 콘텐츠 */}
       <main className="max-w-7xl mx-auto px-4 py-6">
         {activeTab === 'hall' && (
           <div>
             <div className="flex items-center justify-between mb-4">
-              <h2 className="text-lg font-bold text-slate-800">홀 (Hall) 점검 항목</h2>
+              <h2 className="text-lg font-bold text-slate-800">{lang === 'ko' ? '홀 (Hall) 점검 항목' : 'Hall Audit Items'}</h2>
               <span className="text-xs font-bold px-2 py-1 bg-slate-200 text-slate-600 rounded">WEIGHT 50%</span>
             </div>
             {renderItemGroups(HALL_ITEMS)}
@@ -364,7 +404,7 @@ export default function App() {
         {activeTab === 'kitchen' && (
           <div>
             <div className="flex items-center justify-between mb-4">
-              <h2 className="text-lg font-bold text-slate-800">주방 (Kitchen) 점검 항목</h2>
+              <h2 className="text-lg font-bold text-slate-800">{lang === 'ko' ? '주방 (Kitchen) 점검 항목' : 'Kitchen Audit Items'}</h2>
               <span className="text-xs font-bold px-2 py-1 bg-slate-200 text-slate-600 rounded">WEIGHT 50%</span>
             </div>
             {renderItemGroups(KITCHEN_ITEMS)}
@@ -375,46 +415,46 @@ export default function App() {
           <div className="space-y-6 max-w-3xl mx-auto">
             <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 grid grid-cols-3 gap-4 text-center">
               <div>
-                <p className="text-xs font-semibold text-slate-500">홀 점수</p>
+                <p className="text-xs font-semibold text-slate-500">{lang === 'ko' ? '홀 점수' : 'Hall Score'}</p>
                 <p className="text-2xl font-black text-slate-800 mt-1">{calculateScores().hallScore}점</p>
                 <span className="text-xs font-bold px-2 py-0.5 bg-blue-100 text-blue-700 rounded inline-block mt-1">
-                  {calculateScores().hallGrade}등급
+                  Grade {calculateScores().hallGrade}
                 </span>
               </div>
               <div className="border-x border-slate-100">
-                <p className="text-xs font-semibold text-slate-500">주방 점수</p>
+                <p className="text-xs font-semibold text-slate-500">{lang === 'ko' ? '주방 점수' : 'Kitchen Score'}</p>
                 <p className="text-2xl font-black text-slate-800 mt-1">{calculateScores().kitchenScore}점</p>
                 <span className="text-xs font-bold px-2 py-0.5 bg-indigo-100 text-indigo-700 rounded inline-block mt-1">
-                  {calculateScores().kitchenGrade}등급
+                  Grade {calculateScores().kitchenGrade}
                 </span>
               </div>
               <div>
-                <p className="text-xs font-semibold text-slate-500">최종 점수</p>
+                <p className="text-xs font-semibold text-slate-500">{lang === 'ko' ? '최종 점수' : 'Total Score'}</p>
                 <p className="text-2xl font-black text-blue-600 mt-1">{calculateScores().finalScore}점</p>
                 <span className="text-xs font-bold px-2 py-0.5 bg-emerald-100 text-emerald-700 rounded inline-block mt-1">
-                  {calculateScores().finalGrade}등급
+                  Grade {calculateScores().finalGrade}
                 </span>
               </div>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="bg-white p-4 rounded-xl border border-slate-200">
-                <p className="text-sm font-bold text-slate-700 mb-2">점검자 서명</p>
+                <p className="text-sm font-bold text-slate-700 mb-2">{lang === 'ko' ? '점검자 서명' : 'Inspector Signature'}</p>
                 <div className="border border-slate-200 rounded-lg bg-slate-50 overflow-hidden">
                   <SignatureCanvas ref={managerSigRef} penColor="black" canvasProps={{ className: 'w-full h-32' }} />
                 </div>
                 <button onClick={() => managerSigRef.current?.clear()} className="mt-2 text-xs text-slate-500 flex items-center gap-1">
-                  <RotateCcw className="w-3 h-3" /> 지우기
+                  <RotateCcw className="w-3 h-3" /> {lang === 'ko' ? '지우기' : 'Clear'}
                 </button>
               </div>
 
               <div className="bg-white p-4 rounded-xl border border-slate-200">
-                <p className="text-sm font-bold text-slate-700 mb-2">점주/매니저 서명</p>
+                <p className="text-sm font-bold text-slate-700 mb-2">{lang === 'ko' ? '점주/매니저 서명' : 'Owner/Manager Signature'}</p>
                 <div className="border border-slate-200 rounded-lg bg-slate-50 overflow-hidden">
                   <SignatureCanvas ref={ownerSigRef} penColor="black" canvasProps={{ className: 'w-full h-32' }} />
                 </div>
                 <button onClick={() => ownerSigRef.current?.clear()} className="mt-2 text-xs text-slate-500 flex items-center gap-1">
-                  <RotateCcw className="w-3 h-3" /> 지우기
+                  <RotateCcw className="w-3 h-3" /> {lang === 'ko' ? '지우기' : 'Clear'}
                 </button>
               </div>
             </div>
@@ -424,7 +464,10 @@ export default function App() {
               disabled={isSubmitting}
               className="w-full py-4 rounded-xl font-bold text-white bg-blue-600 hover:bg-blue-700 shadow-lg flex items-center justify-center gap-2 disabled:bg-slate-400"
             >
-              {isSubmitting ? '데이터 저장 중...' : <><Send className="w-5 h-5" /> DB 저장 및 최종 평가 완료</>}
+              {isSubmitting 
+                ? (lang === 'ko' ? '데이터 저장 중...' : 'Saving...') 
+                : <><Send className="w-5 h-5" /> {lang === 'ko' ? 'DB 저장 및 최종 평가 완료' : 'Save to DB & Finish'}</>
+              }
             </button>
           </div>
         )}
@@ -440,13 +483,13 @@ export default function App() {
               onClick={handleReset}
               className="flex items-center gap-1 text-xs text-slate-500 hover:text-slate-800 px-2 py-1 rounded border border-slate-200"
             >
-              <RefreshCw className="w-3 h-3" /> 평가 초기화
+              <RefreshCw className="w-3 h-3" /> {lang === 'ko' ? '평가 초기화' : 'Reset'}
             </button>
           </div>
 
           <div className="flex items-center gap-2">
             <button className="hidden sm:flex items-center gap-1 text-xs px-3 py-2 border border-slate-200 rounded-lg text-slate-600">
-              <Save className="w-3.5 h-3.5" /> 임시 저장
+              <Save className="w-3.5 h-3.5" /> {lang === 'ko' ? '임시 저장' : 'Temp Save'}
             </button>
 
             {activeTab === 'hall' && (
@@ -456,7 +499,9 @@ export default function App() {
                   isHallComplete ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-red-500 hover:bg-red-600'
                 }`}
               >
-                {isHallComplete ? '홀 점검 완료 (다음 단계)' : '홀 점검 항목 완료 필요'}
+                {isHallComplete 
+                  ? (lang === 'ko' ? '홀 점검 완료 (다음 단계)' : 'Hall Done (Next)') 
+                  : (lang === 'ko' ? '홀 점검 항목 완료 필요' : 'Complete Hall Items')}
                 <ChevronRight className="w-4 h-4" />
               </button>
             )}
@@ -468,7 +513,9 @@ export default function App() {
                   isKitchenComplete ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-red-500 hover:bg-red-600'
                 }`}
               >
-                {isKitchenComplete ? '주방 점검 완료 (최종 서명)' : '주방 점검 항목 완료 필요'}
+                {isKitchenComplete 
+                  ? (lang === 'ko' ? '주방 점검 완료 (최종 서명)' : 'Kitchen Done (Next)') 
+                  : (lang === 'ko' ? '주방 점검 항목 완료 필요' : 'Complete Kitchen Items')}
                 <ChevronRight className="w-4 h-4" />
               </button>
             )}
@@ -481,7 +528,7 @@ export default function App() {
           <div className="bg-white rounded-2xl p-5 max-w-md w-full shadow-2xl">
             <div className="flex items-center justify-between pb-3 border-b border-slate-100">
               <h3 className="font-bold text-slate-800 text-sm">
-                사진 첨부 ({activePhotoModalItem.title || activePhotoModalItem.name || activePhotoModalItem.id})
+                {lang === 'ko' ? '사진 첨부' : 'Photo Upload'} ({getText(activePhotoModalItem, lang === 'en')})
               </h3>
               <button onClick={() => setActivePhotoModalItem(null)} className="text-slate-400 hover:text-slate-600">
                 <X className="w-5 h-5" />
@@ -510,7 +557,7 @@ export default function App() {
                 onClick={() => fileInputRef.current?.click()}
                 className="w-full py-2.5 border-2 border-dashed border-slate-200 rounded-xl text-xs font-bold text-slate-600 flex items-center justify-center gap-1.5 hover:border-blue-500 hover:text-blue-600 transition-all"
               >
-                <Camera className="w-4 h-4" /> 사진 직접 촬영 또는 앨범 선택
+                <Camera className="w-4 h-4" /> {lang === 'ko' ? '사진 직접 촬영 또는 앨범 선택' : 'Take Photo or Choose File'}
               </button>
             </div>
 
@@ -518,7 +565,7 @@ export default function App() {
               onClick={() => setActivePhotoModalItem(null)}
               className="w-full py-2.5 bg-slate-800 text-white font-bold rounded-xl text-xs"
             >
-              닫기
+              {lang === 'ko' ? '닫기' : 'Close'}
             </button>
           </div>
         </div>
