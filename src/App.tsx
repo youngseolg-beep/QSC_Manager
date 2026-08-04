@@ -266,6 +266,28 @@ export default function App() {
     return tempCanvas.toDataURL('image/png');
   };
 
+  // ⏰ 날짜 + 시:분 확실하게 파싱하는 헬퍼 함수
+  const formatDateTimeDisplay = (item: any) => {
+    const rawDate = item.inspection_date || '';
+    // 이미 시간에 관한 정보(공백 포함)가 들어있는 경우 그대로 반환
+    if (rawDate.includes(' ') && rawDate.includes(':')) {
+      return rawDate;
+    }
+    
+    // 만약 날짜만 입력된 경우, DB 생성시간(created_at)에서 시:분을 추출하여 결합
+    if (item.created_at) {
+      const dateObj = new Date(item.created_at);
+      const hours = String(dateObj.getHours()).padStart(2, '0');
+      const minutes = String(dateObj.getMinutes()).padStart(2, '0');
+      return `${rawDate} ${hours}:${minutes}`;
+    }
+
+    const now = new Date();
+    const hours = String(now.getHours()).padStart(2, '0');
+    const minutes = String(now.getMinutes()).padStart(2, '0');
+    return `${rawDate} ${hours}:${minutes}`;
+  };
+
   const handleSubmit = async () => {
     if (!validateBasicInfo()) return;
     setIsSubmitting(true);
@@ -276,14 +298,14 @@ export default function App() {
 
       const calculated = calculateScores();
       
-      // ⏰ 저장 누르는 시점의 현재 시:분(HH:mm)을 날짜 뒤에 자동 결합
+      // ⏰ 저장 버튼 누른 현재 시:분 강제 결합
       const now = new Date();
       const hours = String(now.getHours()).padStart(2, '0');
       const minutes = String(now.getMinutes()).padStart(2, '0');
       const fullDateTime = `${inspectionDate} ${hours}:${minutes}`;
 
       const payload = {
-        inspection_date: fullDateTime,
+        inspection_date: fullDateTime, // 저장할 때 날짜+시간 통째로 전달
         branch_name: branchName,
         inspector_name: inspectorName,
         kitchen_score: calculated.kitchenScore,
@@ -339,7 +361,7 @@ export default function App() {
     setIsEditing(true);
     setEditBranchName(item.branch_name || '');
     setEditInspectorName(item.inspector_name || '');
-    setEditInspectionDate(item.inspection_date || '');
+    setEditInspectionDate(formatDateTimeDisplay(item));
     setEditManagerComment(item.manager_comment || '');
     setEditOwnerComment(item.owner_comment || '');
     setEditDetails(item.details || {});
@@ -572,7 +594,6 @@ export default function App() {
         }
       `}</style>
 
-      {/* 깔끔한 헤더 (상단 시간 입력창 제거) */}
       <header className="bg-white border-b border-slate-200 sticky top-0 z-30 shadow-sm print:hidden">
         <div className="max-w-7xl mx-auto px-3.5 py-2.5 flex flex-wrap items-center justify-between gap-2.5">
           <div className="flex items-center gap-1.5">
@@ -826,10 +847,10 @@ export default function App() {
                           )}
                         </div>
                         
-                        {/* ⏰ 시:분 포함 자동 생성 시각 표기 */}
+                        {/* ⏰ 핵심 수정: 기존데이터 및 신규데이터 모두 시:분(HH:mm) 확실하게 파싱해서 표시 */}
                         <h3 className="font-bold text-slate-800 text-sm sm:text-base mt-1 flex items-center gap-1">
                           <Clock className="w-3.5 h-3.5 text-slate-400" />
-                          {item.inspection_date}
+                          {formatDateTimeDisplay(item)}
                         </h3>
                         <p className="text-[11px] text-slate-500 mt-0.5">점검자: {item.inspector_name}</p>
                       </div>
@@ -1054,7 +1075,7 @@ export default function App() {
                   ) : (
                     <p className="text-xs sm:text-sm text-slate-500 mt-1 flex items-center justify-center gap-1">
                       <Clock className="w-3.5 h-3.5 text-slate-400" />
-                      {isReportEn ? 'Inspection Date & Time:' : '점검 일시:'} {selectedInspection.inspection_date}
+                      {isReportEn ? 'Inspection Date & Time:' : '점검 일시:'} {formatDateTimeDisplay(selectedInspection)}
                     </p>
                   )}
                 </div>
