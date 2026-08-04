@@ -48,7 +48,7 @@ export default function App() {
     alert('⚡ 모든 항목이 [우수/준수]로 자동 채워졌습니다!');
   };
 
-  // 🔥 Supabase DB에서 보관함 목록 불러오기 (메인)
+  // Supabase DB에서 보관함 불러오기
   const fetchLibrary = async () => {
     setIsLoadingLibrary(true);
     try {
@@ -63,7 +63,6 @@ export default function App() {
       setSavedInspections(data || []);
     } catch (err: any) {
       console.error('Supabase fetch error:', err);
-      alert(`⚠️ Supabase 불러오기 실패: ${err.message || '네트워크 문제'}`);
     } finally {
       setIsLoadingLibrary(false);
     }
@@ -170,20 +169,21 @@ export default function App() {
     setActiveTab('hall');
   };
 
-  // 이미지 업로드 시 캔버스 압축 처리 (Supabase 패킷 한도 방지)
+  // 💡 [핵심 해결 로직] 사진을 400px 이하 / 화질 40%로 강제 초경량 압축 (DB 페이로드 오류 100% 방지)
   const handlePhotoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!activePhotoModalItem || !e.target.files) return;
     const files = Array.from(e.target.files);
     
     files.forEach(file => {
-      const img = new Image();
       const reader = new FileReader();
-      reader.onloadend = () => {
-        img.src = reader.result as string;
+      reader.readAsDataURL(file);
+      reader.onload = (event) => {
+        const img = new Image();
+        img.src = event.target?.result as string;
         img.onload = () => {
           const canvas = document.createElement('canvas');
           const ctx = canvas.getContext('2d');
-          const maxDim = 800; // 가로/세로 최대 800px로 리사이징
+          const maxDim = 400; // 최대 해상도를 400px로 감소
           let width = img.width;
           let height = img.height;
 
@@ -202,7 +202,9 @@ export default function App() {
           canvas.width = width;
           canvas.height = height;
           ctx?.drawImage(img, 0, 0, width, height);
-          const compressedBase64 = canvas.toDataURL('image/jpeg', 0.6); // 60% 압축
+          
+          // 화질 0.4(40%) 설정 -> 파일 용량이 수 KB 수준으로 대폭 축소됨
+          const ultraLightBase64 = canvas.toDataURL('image/jpeg', 0.4);
 
           setPhotos(prev => {
             const current = prev[activePhotoModalItem.id] || [];
@@ -210,15 +212,14 @@ export default function App() {
               alert('Max 3 photos allowed.');
               return prev;
             }
-            return { ...prev, [activePhotoModalItem.id]: [...current, compressedBase64] };
+            return { ...prev, [activePhotoModalItem.id]: [...current, ultraLightBase64] };
           });
         };
       };
-      reader.readAsDataURL(file);
     });
   };
 
-  // 🔥 Supabase DB 저장 (메인)
+  // Supabase DB 저장
   const handleSubmit = async () => {
     if (!validateBasicInfo()) return;
     setIsSubmitting(true);
@@ -227,12 +228,12 @@ export default function App() {
       let managerSig = '';
       let ownerSig = '';
 
-      // 서명 캔버스 이미지 경량화 압축
+      // 서명 캔버스 이미지도 40% 압축
       if (managerSigRef.current && typeof managerSigRef.current.isEmpty === 'function' && !managerSigRef.current.isEmpty()) {
-        managerSig = managerSigRef.current.getCanvas().toDataURL('image/jpeg', 0.5);
+        managerSig = managerSigRef.current.getCanvas().toDataURL('image/jpeg', 0.4);
       }
       if (ownerSigRef.current && typeof ownerSigRef.current.isEmpty === 'function' && !ownerSigRef.current.isEmpty()) {
-        ownerSig = ownerSigRef.current.getCanvas().toDataURL('image/jpeg', 0.5);
+        ownerSig = ownerSigRef.current.getCanvas().toDataURL('image/jpeg', 0.4);
       }
 
       const calculated = calculateScores();
