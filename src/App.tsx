@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { 
   Building2, User, Calendar, CheckCircle2, 
-  RotateCcw, Send, ShieldCheck, ChevronRight, Camera, X, RefreshCw, Save, Globe, FolderArchive, Printer, Eye
+  RotateCcw, Send, ShieldCheck, ChevronRight, Camera, X, RefreshCw, Save, Globe, FolderArchive, Printer, Eye, Zap
 } from 'lucide-react';
 import SignatureCanvas from 'react-signature-canvas';
 
@@ -34,6 +34,22 @@ export default function App() {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const isEn = lang === 'en';
+
+  // ⚡ 테스트용 더미 데이터 1초 자동 채우기 함수
+  const fillDummyData = () => {
+    setBranchName('강남 직영점(테스트)');
+    setInspectorName('홍길동 매니저');
+    
+    const dummyScores: Record<string, number> = {};
+    CHECKLIST_ITEMS.forEach((item) => {
+      // 첫 번째 옵션(최고점)으로 자동 클릭 처리
+      if (item.options && item.options.length > 0) {
+        dummyScores[item.id] = item.options[0].val;
+      }
+    });
+    setScores(dummyScores);
+    alert('⚡ 모든 항목이 [우수/준수]로 자동 채워졌습니다! 빠른 테스트를 진행하세요.');
+  };
 
   // 보관함 목록 불러오기
   const fetchLibrary = async () => {
@@ -80,7 +96,7 @@ export default function App() {
     return true;
   };
 
-  // 홀 완료 (순서대로 1번부터 연속 번호 팝업 출력)
+  // 홀 완료
   const handleHallComplete = () => {
     if (!validateBasicInfo()) return;
     const unchecked = getUncheckedItems(HALL_ITEMS);
@@ -95,7 +111,7 @@ export default function App() {
     setActiveTab('kitchen');
   };
 
-  // 주방 완료 (순서대로 1번부터 연속 번호 팝업 출력)
+  // 주방 완료
   const handleKitchenComplete = () => {
     if (!validateBasicInfo()) return;
     const unchecked = getUncheckedItems(KITCHEN_ITEMS);
@@ -120,7 +136,7 @@ export default function App() {
         const selectedVal = scores[item.id];
         if (selectedVal !== undefined) {
           if (selectedVal === -1) {
-            // 비해당(-) 선택 시 총점 및 최대 점수에서 제외
+            // 비해당(-) 제외
           } else {
             totalMax += (item.maxScore || 0);
             totalCurrent += selectedVal;
@@ -229,7 +245,6 @@ export default function App() {
     }
   };
 
-  // PDF 출력
   const handlePrintPDF = () => {
     window.print();
   };
@@ -332,6 +347,15 @@ export default function App() {
           </div>
 
           <div className="flex items-center gap-3 flex-wrap">
+            {/* ⚡ 더미데이터 자동채우기 버튼 */}
+            <button
+              onClick={fillDummyData}
+              className="flex items-center gap-1.5 bg-amber-50 text-amber-700 px-3 py-1.5 rounded-lg text-xs font-bold border border-amber-300 hover:bg-amber-100 shadow-sm transition-all"
+            >
+              <Zap className="w-3.5 h-3.5 fill-amber-500 text-amber-500" />
+              테스트용 더미 채우기
+            </button>
+
             <button
               onClick={() => setLang(l => l === 'ko' ? 'en' : 'ko')}
               className="flex items-center gap-1.5 bg-blue-50 text-blue-700 px-3 py-1.5 rounded-lg text-xs font-bold border border-blue-200 hover:bg-blue-100 transition-all"
@@ -651,7 +675,7 @@ export default function App() {
         </div>
       )}
 
-      {/* 보관함 상세보기 및 PDF 인쇄 팝업 모달 */}
+      {/* 보관함 상세보기 모달 */}
       {selectedInspection && (
         <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 overflow-y-auto">
           <div className="bg-white rounded-2xl max-w-2xl w-full p-6 shadow-2xl relative my-8">
@@ -670,7 +694,6 @@ export default function App() {
               </div>
             </div>
 
-            {/* 인쇄 대상 영역 */}
             <div className="py-6 space-y-6">
               <div className="text-center border-b pb-4">
                 <h2 className="text-2xl font-black text-slate-900">QSC 점검 평가 리포트</h2>
@@ -697,7 +720,6 @@ export default function App() {
                 </div>
               </div>
 
-              {/* 서명 내역 */}
               <div className="grid grid-cols-2 gap-4 pt-4 border-t border-slate-200">
                 <div className="text-center">
                   <p className="text-xs font-bold text-slate-600 mb-2">점검자 서명</p>
