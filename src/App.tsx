@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { 
   Building2, User, Calendar, CheckCircle2, 
-  RotateCcw, Send, ShieldCheck, ChevronRight, Camera, X, RefreshCw, Globe, FolderArchive, Printer, Eye, Zap
+  RotateCcw, Send, ShieldCheck, ChevronRight, Camera, X, RefreshCw, Globe, FolderArchive, Printer, Eye, Zap, Download, Trash2, Edit3, Save
 } from 'lucide-react';
 import SignatureCanvas from 'react-signature-canvas';
 
@@ -26,6 +26,16 @@ export default function App() {
   const [savedInspections, setSavedInspections] = useState<any[]>([]);
   const [selectedInspection, setSelectedInspection] = useState<any | null>(null);
   const [isLoadingLibrary, setIsLoadingLibrary] = useState(false);
+
+  // 수정 모드 관련 상태
+  const [isEditing, setIsEditing] = useState(false);
+  const [editBranchName, setEditBranchName] = useState('');
+  const [editInspectorName, setEditInspectorName] = useState('');
+  const [editInspectionDate, setEditInspectionDate] = useState('');
+  const [editDetails, setEditDetails] = useState<Record<string, number>>({});
+
+  // 이미지 확대(Zoom) 라이트박스 모달 상태
+  const [enlargedImage, setEnlargedImage] = useState<string | null>(null);
 
   const managerSigRef = useRef<any>(null);
   const ownerSigRef = useRef<any>(null);
@@ -120,16 +130,17 @@ export default function App() {
     setActiveTab('final');
   };
 
-  const calculateScores = () => {
+  const calculateScores = (customScores?: Record<string, number>) => {
+    const targetScores = customScores || scores;
     const calcGroup = (items: any[]) => {
       let totalMax = 0;
       let totalCurrent = 0;
 
       items.forEach(item => {
-        const selectedVal = scores[item.id];
+        const selectedVal = targetScores[item.id];
         if (selectedVal !== undefined) {
           if (selectedVal === -1) {
-            // 비해당 제외
+            // 비해당
           } else {
             totalMax += (item.maxScore || 0);
             totalCurrent += selectedVal;
@@ -168,11 +179,20 @@ export default function App() {
     setActiveTab('hall');
   };
 
+  const downloadImageFile = (base64Data: string, filename: string) => {
+    const link = document.createElement('a');
+    link.href = base64Data;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
   const handlePhotoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!activePhotoModalItem || !e.target.files) return;
     const files = Array.from(e.target.files);
     
-    files.forEach(file => {
+    files.forEach((file, fIdx) => {
       const reader = new FileReader();
       reader.readAsDataURL(file);
       reader.onload = (event) => {
@@ -181,7 +201,7 @@ export default function App() {
         img.onload = () => {
           const canvas = document.createElement('canvas');
           const ctx = canvas.getContext('2d');
-          const maxDim = 300;
+          const maxDim = 400;
           let width = img.width;
           let height = img.height;
 
@@ -201,7 +221,10 @@ export default function App() {
           canvas.height = height;
           ctx?.drawImage(img, 0, 0, width, height);
           
-          const ultraLightBase64 = canvas.toDataURL('image/jpeg', 0.3);
+          const compressedBase64 = canvas.toDataURL('image/jpeg', 0.5);
+
+          const filename = `QSC_${activePhotoModalItem.id}_${Date.now()}_${fIdx + 1}.jpg`;
+          downloadImageFile(compressedBase64, filename);
 
           setPhotos(prev => {
             const current = prev[activePhotoModalItem.id] || [];
@@ -209,11 +232,27 @@ export default function App() {
               alert('Max 3 photos allowed.');
               return prev;
             }
-            return { ...prev, [activePhotoModalItem.id]: [...current, ultraLightBase64] };
+            return { ...prev, [activePhotoModalItem.id]: [...current, compressedBase64] };
           });
         };
       };
     });
+  };
+
+  const getWhiteBgSignature = (sigRef: any) => {
+    if (!sigRef.current || sigRef.current.isEmpty()) return '';
+    const canvas = sigRef.current.getCanvas();
+    const tempCanvas = document.createElement('canvas');
+    tempCanvas.width = canvas.width;
+    tempCanvas.height = canvas.height;
+    const ctx = tempCanvas.getContext('2d');
+    
+    if (ctx) {
+      ctx.fillStyle = '#FFFFFF';
+      ctx.fillRect(0, 0, tempCanvas.width, tempCanvas.height);
+      ctx.drawImage(canvas, 0, 0);
+    }
+    return tempCanvas.toDataURL('image/png');
   };
 
   const handleSubmit = async () => {
@@ -221,15 +260,8 @@ export default function App() {
     setIsSubmitting(true);
 
     try {
-      let managerSig = '';
-      let ownerSig = '';
-
-      if (managerSigRef.current && typeof managerSigRef.current.isEmpty === 'function' && !managerSigRef.current.isEmpty()) {
-        managerSig = managerSigRef.current.getCanvas().toDataURL('image/jpeg', 0.3);
-      }
-      if (ownerSigRef.current && typeof ownerSigRef.current.isEmpty === 'function' && !ownerSigRef.current.isEmpty()) {
-        ownerSig = ownerSigRef.current.getCanvas().toDataURL('image/jpeg', 0.3);
-      }
+      const managerSig = getWhiteBgSignature(managerSigRef);
+      const ownerSig = getWhiteBgSignature(ownerSigRef);
 
       const calculated = calculateScores();
 
@@ -250,7 +282,7 @@ export default function App() {
         language: lang
       };
 
-      const { data, error } = await supabase.from('inspections').insert([payload]).select();
+      const { error } = await supabase.from('inspections').insert([payload]).select();
 
       if (error) {
         throw error;
@@ -264,6 +296,71 @@ export default function App() {
       alert(`⚠️ Supabase DB 저장 실패: ${err.message || '네트워크 통신 오류가 발생했습니다.'}`);
     } finally {
       setIsSubmitting(false);
+    }
+  };
+
+  // 🗑️ 리포트 삭제 함수
+  const handleDeleteInspection = async (id: string, branch: string, date: string) => {
+    if (!window.confirm(`정말 [${branch} (${date})] 리포트를 삭제하시겠습니까?`)) return;
+
+    try {
+      const { error } = await supabase.from('inspections').delete().eq('id', id);
+      if (error) throw error;
+
+      alert('🗑️ 성공적으로 삭제되었습니다.');
+      if (selectedInspection?.id === id) {
+        setSelectedInspection(null);
+      }
+      fetchLibrary();
+    } catch (err: any) {
+      alert(`⚠️ 삭제 실패: ${err.message}`);
+    }
+  };
+
+  // ✏️ 수정 모드 시작
+  const startEditing = (item: any) => {
+    setIsEditing(true);
+    setEditBranchName(item.branch_name || '');
+    setEditInspectorName(item.inspector_name || '');
+    setEditInspectionDate(item.inspection_date || '');
+    setEditDetails(item.details || {});
+  };
+
+  // 💾 수정사항 저장 함수
+  const handleSaveEdit = async () => {
+    if (!selectedInspection) return;
+
+    try {
+      const calculated = calculateScores(editDetails);
+
+      const updatePayload = {
+        branch_name: editBranchName,
+        inspector_name: editInspectorName,
+        inspection_date: editInspectionDate,
+        details: editDetails,
+        kitchen_score: calculated.kitchenScore,
+        kitchen_grade: calculated.kitchenGrade,
+        hall_score: calculated.hallScore,
+        hall_grade: calculated.hallGrade,
+        final_score: calculated.finalScore,
+        final_grade: calculated.finalGrade,
+      };
+
+      const { error } = await supabase
+        .from('inspections')
+        .update(updatePayload)
+        .eq('id', selectedInspection.id);
+
+      if (error) throw error;
+
+      alert('💾 성공적으로 수정되었습니다!');
+      
+      const updatedItem = { ...selectedInspection, ...updatePayload };
+      setSelectedInspection(updatedItem);
+      setIsEditing(false);
+      fetchLibrary();
+    } catch (err: any) {
+      alert(`⚠️ 수정 저장 실패: ${err.message}`);
     }
   };
 
@@ -311,6 +408,20 @@ export default function App() {
                       </div>
 
                       <div className="flex items-center gap-2 flex-wrap justify-end">
+                        {itemPhotos.length > 0 && (
+                          <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-lg border border-slate-200">
+                            {itemPhotos.map((img, pIdx) => (
+                              <img 
+                                key={pIdx} 
+                                src={img} 
+                                alt="첨부" 
+                                onClick={() => setEnlargedImage(img)}
+                                className="w-7 h-7 object-cover rounded cursor-pointer hover:opacity-80 border border-slate-300"
+                              />
+                            ))}
+                          </div>
+                        )}
+
                         <div className="flex items-center gap-1 bg-white p-1 rounded-lg border border-slate-200">
                           {item.options.map((opt: any) => {
                             const val = opt.val;
@@ -357,7 +468,7 @@ export default function App() {
 
   const renderDetailReportItems = (details: Record<string, number>, photoData: Record<string, string[]>) => {
     return CHECKLIST_ITEMS.map((item, idx) => {
-      const val = details ? details[item.id] : undefined;
+      const val = isEditing ? editDetails[item.id] : (details ? details[item.id] : undefined);
       const matchedOpt = item.options.find((o: any) => o.val === val);
       const label = matchedOpt ? matchedOpt.label : (val !== undefined ? `${val}점` : '미평가');
       const itemPhotos = photoData ? (photoData[item.id] || []) : [];
@@ -367,12 +478,39 @@ export default function App() {
           <td className="p-2 font-bold text-center border-r border-slate-200 text-slate-500">{idx + 1}</td>
           <td className="p-2 border-r border-slate-200 text-slate-600 font-semibold">{item.category} &gt; {item.subCategory}</td>
           <td className="p-2 border-r border-slate-200 font-medium text-slate-800">{item.task}</td>
-          <td className="p-2 border-r border-slate-200 text-center font-bold text-blue-600 bg-slate-50/50">{label}</td>
+          
+          <td className="p-2 border-r border-slate-200 text-center font-bold text-blue-600 bg-slate-50/50">
+            {isEditing ? (
+              <select
+                value={val !== undefined ? val : ''}
+                onChange={(e) => {
+                  const newVal = Number(e.target.value);
+                  setEditDetails(prev => ({ ...prev, [item.id]: newVal }));
+                }}
+                className="bg-white border border-blue-300 rounded px-1 py-1 text-xs font-bold text-blue-700 outline-none"
+              >
+                {item.options.map((opt: any) => (
+                  <option key={opt.label} value={opt.val}>
+                    {opt.label}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              label
+            )}
+          </td>
+
           <td className="p-2 text-center">
             {itemPhotos.length > 0 ? (
               <div className="flex items-center justify-center gap-1">
                 {itemPhotos.map((img, photoIdx) => (
-                  <img key={photoIdx} src={img} alt="증빙" className="w-10 h-10 object-cover rounded border" />
+                  <img 
+                    key={photoIdx} 
+                    src={img} 
+                    alt="증빙" 
+                    onClick={() => setEnlargedImage(img)}
+                    className="w-10 h-10 object-cover rounded border cursor-pointer hover:scale-105 transition-transform" 
+                  />
                 ))}
               </div>
             ) : (
@@ -530,7 +668,7 @@ export default function App() {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="bg-white p-4 rounded-xl border border-slate-200">
                 <p className="text-sm font-bold text-slate-700 mb-2">{isEn ? 'Inspector Signature' : '점검자 서명'}</p>
-                <div className="border border-slate-200 rounded-lg bg-slate-50 overflow-hidden">
+                <div className="border border-slate-200 rounded-lg bg-white overflow-hidden">
                   <SignatureCanvas ref={managerSigRef} penColor="black" canvasProps={{ className: 'w-full h-32' }} />
                 </div>
                 <button onClick={() => managerSigRef.current?.clear()} className="mt-2 text-xs text-slate-500 flex items-center gap-1">
@@ -540,7 +678,7 @@ export default function App() {
 
               <div className="bg-white p-4 rounded-xl border border-slate-200">
                 <p className="text-sm font-bold text-slate-700 mb-2">{isEn ? 'Owner/Manager Signature' : '점주/매니저 서명'}</p>
-                <div className="border border-slate-200 rounded-lg bg-slate-50 overflow-hidden">
+                <div className="border border-slate-200 rounded-lg bg-white overflow-hidden">
                   <SignatureCanvas ref={ownerSigRef} penColor="black" canvasProps={{ className: 'w-full h-32' }} />
                 </div>
                 <button onClick={() => ownerSigRef.current?.clear()} className="mt-2 text-xs text-slate-500 flex items-center gap-1">
@@ -587,7 +725,7 @@ export default function App() {
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {savedInspections.map((item) => (
-                  <div key={item.id} className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm hover:shadow-md transition-all">
+                  <div key={item.id} className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm hover:shadow-md transition-all relative">
                     <div className="flex items-start justify-between border-b border-slate-100 pb-3 mb-3">
                       <div>
                         <span className="text-xs font-bold px-2 py-0.5 bg-blue-50 text-blue-600 rounded">
@@ -598,7 +736,7 @@ export default function App() {
                         </h3>
                         <p className="text-xs text-slate-500 mt-0.5">점검자: {item.inspector_name}</p>
                       </div>
-                      <div className="text-right">
+                      <div className="text-right flex flex-col items-end gap-1">
                         <p className="text-xl font-black text-blue-600">{item.final_score}점</p>
                         <span className="text-xs font-bold px-2 py-0.5 bg-emerald-100 text-emerald-700 rounded">
                           Grade {item.final_grade}
@@ -610,12 +748,24 @@ export default function App() {
                       <div className="text-xs text-slate-500">
                         홀 {item.hall_score}점 | 주방 {item.kitchen_score}점
                       </div>
-                      <button
-                        onClick={() => setSelectedInspection(item)}
-                        className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-bold text-xs flex items-center gap-1"
-                      >
-                        <Eye className="w-3.5 h-3.5" /> 상세 보고서 / PDF
-                      </button>
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          onClick={() => {
+                            setSelectedInspection(item);
+                            setIsEditing(false);
+                          }}
+                          className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-bold text-xs flex items-center gap-1"
+                        >
+                          <Eye className="w-3.5 h-3.5" /> 상세 보고서 / PDF
+                        </button>
+                        <button
+                          onClick={() => handleDeleteInspection(item.id, item.branch_name, item.inspection_date)}
+                          className="p-1.5 bg-red-50 text-red-600 hover:bg-red-100 rounded-lg text-xs transition-all"
+                          title="삭제"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
                     </div>
                   </div>
                 ))}
@@ -671,6 +821,7 @@ export default function App() {
         </div>
       </footer>
 
+      {/* 사진 첨부 모달 */}
       {activePhotoModalItem && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl p-5 max-w-md w-full shadow-2xl">
@@ -686,8 +837,15 @@ export default function App() {
             <div className="py-4">
               <div className="grid grid-cols-3 gap-2 mb-3">
                 {(photos[activePhotoModalItem.id] || []).map((img, idx) => (
-                  <div key={idx} className="relative aspect-square rounded-lg overflow-hidden border border-slate-200">
+                  <div key={idx} className="relative aspect-square rounded-lg overflow-hidden border border-slate-200 group">
                     <img src={img} alt="증빙" className="w-full h-full object-cover" />
+                    <a
+                      href={img}
+                      download={`photo_${idx + 1}.jpg`}
+                      className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center text-white text-xs font-bold transition-opacity"
+                    >
+                      <Download className="w-4 h-4" />
+                    </a>
                   </div>
                 ))}
               </div>
@@ -705,7 +863,7 @@ export default function App() {
                 onClick={() => fileInputRef.current?.click()}
                 className="w-full py-2.5 border-2 border-dashed border-slate-200 rounded-xl text-xs font-bold text-slate-600 flex items-center justify-center gap-1.5 hover:border-blue-500 hover:text-blue-600 transition-all"
               >
-                <Camera className="w-4 h-4" /> {isEn ? 'Take Photo or Choose File' : '사진 직접 촬영 또는 앨범 선택'}
+                <Camera className="w-4 h-4" /> {isEn ? 'Take Photo or Choose File' : '사진 촬영 / 선택 (갤러리 자동 저장)'}
               </button>
             </div>
 
@@ -719,19 +877,53 @@ export default function App() {
         </div>
       )}
 
+      {/* 상세보기 및 수정/삭제 모달 */}
       {selectedInspection && (
         <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 overflow-y-auto">
           <div className="bg-white rounded-2xl max-w-4xl w-full p-6 shadow-2xl relative my-8 max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between pb-4 border-b border-slate-200 sticky top-0 bg-white z-10 print:hidden">
-              <h3 className="font-bold text-slate-800 text-lg">상세 QSC 점검 리포트</h3>
+              <h3 className="font-bold text-slate-800 text-lg">
+                {isEditing ? '✏️ 점검 리포트 수정 중' : '상세 QSC 점검 리포트'}
+              </h3>
               <div className="flex items-center gap-2">
-                <button
-                  onClick={handlePrintPDF}
-                  className="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold px-4 py-2 rounded-lg flex items-center gap-1.5 shadow"
-                >
-                  <Printer className="w-4 h-4" /> PDF 저장 / 인쇄
-                </button>
-                <button onClick={() => setSelectedInspection(null)} className="text-slate-400 hover:text-slate-600 p-1">
+                {!isEditing ? (
+                  <>
+                    <button
+                      onClick={() => startEditing(selectedInspection)}
+                      className="bg-amber-500 hover:bg-amber-600 text-white text-xs font-bold px-3 py-2 rounded-lg flex items-center gap-1 shadow"
+                    >
+                      <Edit3 className="w-3.5 h-3.5" /> 내용 수정
+                    </button>
+                    <button
+                      onClick={handlePrintPDF}
+                      className="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold px-3 py-2 rounded-lg flex items-center gap-1 shadow"
+                    >
+                      <Printer className="w-3.5 h-3.5" /> PDF 저장 / 인쇄
+                    </button>
+                    <button
+                      onClick={() => handleDeleteInspection(selectedInspection.id, selectedInspection.branch_name, selectedInspection.inspection_date)}
+                      className="bg-red-50 text-red-600 hover:bg-red-100 text-xs font-bold px-3 py-2 rounded-lg flex items-center gap-1"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" /> 삭제
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <button
+                      onClick={handleSaveEdit}
+                      className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold px-4 py-2 rounded-lg flex items-center gap-1 shadow"
+                    >
+                      <Save className="w-4 h-4" /> 수정사항 저장
+                    </button>
+                    <button
+                      onClick={() => setIsEditing(false)}
+                      className="bg-slate-200 text-slate-700 text-xs font-bold px-3 py-2 rounded-lg"
+                    >
+                      취소
+                    </button>
+                  </>
+                )}
+                <button onClick={() => setSelectedInspection(null)} className="text-slate-400 hover:text-slate-600 p-1 ml-2">
                   <X className="w-6 h-6" />
                 </button>
               </div>
@@ -740,26 +932,68 @@ export default function App() {
             <div className="py-6 space-y-6">
               <div className="text-center border-b pb-4">
                 <h2 className="text-2xl font-black text-slate-900">QSC 점검 종합 평가 리포트</h2>
-                <p className="text-sm text-slate-500 mt-1">점검 일자: {selectedInspection.inspection_date}</p>
+                {isEditing ? (
+                  <div className="mt-2 inline-flex items-center gap-2 bg-slate-100 px-3 py-1 rounded-lg">
+                    <span className="text-xs font-bold text-slate-500">점검 일자:</span>
+                    <input
+                      type="date"
+                      value={editInspectionDate}
+                      onChange={(e) => setEditInspectionDate(e.target.value)}
+                      className="bg-white border rounded px-2 py-0.5 text-xs font-bold text-slate-800"
+                    />
+                  </div>
+                ) : (
+                  <p className="text-sm text-slate-500 mt-1">점검 일자: {selectedInspection.inspection_date}</p>
+                )}
               </div>
 
               <div className="grid grid-cols-2 gap-4 bg-slate-50 p-4 rounded-xl text-sm border border-slate-200">
-                <div><span className="font-bold text-slate-700">지점명:</span> {selectedInspection.branch_name}</div>
-                <div><span className="font-bold text-slate-700">점검자:</span> {selectedInspection.inspector_name}</div>
+                <div>
+                  <span className="font-bold text-slate-700 mr-2">지점명:</span> 
+                  {isEditing ? (
+                    <input
+                      type="text"
+                      value={editBranchName}
+                      onChange={(e) => setEditBranchName(e.target.value)}
+                      className="bg-white border rounded px-2 py-1 text-xs font-bold text-slate-800 w-44"
+                    />
+                  ) : (
+                    selectedInspection.branch_name
+                  )}
+                </div>
+                <div>
+                  <span className="font-bold text-slate-700 mr-2">점검자:</span> 
+                  {isEditing ? (
+                    <input
+                      type="text"
+                      value={editInspectorName}
+                      onChange={(e) => setEditInspectorName(e.target.value)}
+                      className="bg-white border rounded px-2 py-1 text-xs font-bold text-slate-800 w-36"
+                    />
+                  ) : (
+                    selectedInspection.inspector_name
+                  )}
+                </div>
               </div>
 
               <div className="grid grid-cols-3 gap-2 text-center bg-blue-50/50 p-4 rounded-xl border border-blue-100">
                 <div>
                   <p className="text-xs font-bold text-slate-500">홀 점수</p>
-                  <p className="text-xl font-black text-slate-800">{selectedInspection.hall_score}점 ({selectedInspection.hall_grade})</p>
+                  <p className="text-xl font-black text-slate-800">
+                    {isEditing ? calculateScores(editDetails).hallScore : selectedInspection.hall_score}점 ({isEditing ? calculateScores(editDetails).hallGrade : selectedInspection.hall_grade})
+                  </p>
                 </div>
                 <div>
                   <p className="text-xs font-bold text-slate-500">주방 점수</p>
-                  <p className="text-xl font-black text-slate-800">{selectedInspection.kitchen_score}점 ({selectedInspection.kitchen_grade})</p>
+                  <p className="text-xl font-black text-slate-800">
+                    {isEditing ? calculateScores(editDetails).kitchenScore : selectedInspection.kitchen_score}점 ({isEditing ? calculateScores(editDetails).kitchenGrade : selectedInspection.kitchen_grade})
+                  </p>
                 </div>
                 <div>
                   <p className="text-xs font-bold text-slate-500">최종 점수</p>
-                  <p className="text-xl font-black text-blue-600">{selectedInspection.final_score}점 ({selectedInspection.final_grade})</p>
+                  <p className="text-xl font-black text-blue-600">
+                    {isEditing ? calculateScores(editDetails).finalScore : selectedInspection.final_score}점 ({isEditing ? calculateScores(editDetails).finalGrade : selectedInspection.final_grade})
+                  </p>
                 </div>
               </div>
 
@@ -774,7 +1008,7 @@ export default function App() {
                         <th className="p-2 text-center w-12 border-r border-slate-200">No.</th>
                         <th className="p-2 w-44 border-r border-slate-200">카테고리</th>
                         <th className="p-2 border-r border-slate-200">점검 항목 내용</th>
-                        <th className="p-2 text-center w-24 border-r border-slate-200">평가 결과</th>
+                        <th className="p-2 text-center w-28 border-r border-slate-200">평가 결과</th>
                         <th className="p-2 text-center w-28">첨부 사진</th>
                       </tr>
                     </thead>
@@ -789,17 +1023,35 @@ export default function App() {
                 <div className="text-center">
                   <p className="text-xs font-bold text-slate-600 mb-2">점검자 서명</p>
                   {selectedInspection.manager_signature ? (
-                    <img src={selectedInspection.manager_signature} alt="점검자 서명" className="h-20 mx-auto object-contain border rounded bg-slate-50" />
+                    <img src={selectedInspection.manager_signature} alt="점검자 서명" className="h-20 mx-auto object-contain border rounded-lg bg-white shadow-sm p-1" />
                   ) : <span className="text-xs text-slate-400">서명 없음</span>}
                 </div>
                 <div className="text-center">
                   <p className="text-xs font-bold text-slate-600 mb-2">점주/매니저 서명</p>
                   {selectedInspection.owner_signature ? (
-                    <img src={selectedInspection.owner_signature} alt="점주 서명" className="h-20 mx-auto object-contain border rounded bg-slate-50" />
+                    <img src={selectedInspection.owner_signature} alt="점주 서명" className="h-20 mx-auto object-contain border rounded-lg bg-white shadow-sm p-1" />
                   ) : <span className="text-xs text-slate-400">서명 없음</span>}
                 </div>
               </div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* 사진 크게 보기 팝업 */}
+      {enlargedImage && (
+        <div 
+          onClick={() => setEnlargedImage(null)}
+          className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4 cursor-pointer"
+        >
+          <div className="relative max-w-3xl w-full max-h-[90vh] flex items-center justify-center">
+            <img src={enlargedImage} alt="확대보기" className="max-w-full max-h-[85vh] rounded-lg shadow-2xl object-contain bg-white" />
+            <button 
+              onClick={() => setEnlargedImage(null)}
+              className="absolute -top-10 right-0 text-white hover:text-slate-300 font-bold text-sm flex items-center gap-1"
+            >
+              <X className="w-6 h-6" /> 닫기
+            </button>
           </div>
         </div>
       )}
