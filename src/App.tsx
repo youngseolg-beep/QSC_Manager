@@ -16,8 +16,14 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<'hall' | 'kitchen' | 'final' | 'library'>('hall');
   const [branchName, setBranchName] = useState('');
   const [inspectorName, setInspectorName] = useState('');
-  const [inspectionDate, setInspectionDate] = useState(new Date().toISOString().split('T')[0]);
   
+  // ⏰ 날짜 및 시간 기본값 (현재 일시 자동 세팅)
+  const [inspectionDate, setInspectionDate] = useState(new Date().toISOString().split('T')[0]);
+  const [inspectionTime, setInspectionTime] = useState(() => {
+    const now = new Date();
+    return `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+  });
+
   // 이슈 및 요청사항 코멘트 상태
   const [managerComment, setManagerComment] = useState('');
   const [ownerComment, setOwnerComment] = useState('');
@@ -47,14 +53,13 @@ export default function App() {
   const ownerSigRef = useRef<any>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // 점검 리스트만 영문 변환 (기본 UI는 한글 고정)
   const isItemListEn = lang === 'en';
 
   const fillDummyData = () => {
     setBranchName('강남 직영점(테스트)');
     setInspectorName('홍길동 매니저');
-    setManagerComment('홀 집기류 교체 검토 바람.');
-    setOwnerComment('주방 냉장고 소음 점검 부탁드립니다.');
+    setManagerComment(isItemListEn ? 'Need to replace hall fixtures.' : '홀 집기류 교체 검토 바람.');
+    setOwnerComment(isItemListEn ? 'Please check kitchen fridge noise.' : '주방 냉장고 소음 점검 부탁드립니다.');
     
     const dummyScores: Record<string, number> = {};
     CHECKLIST_ITEMS.forEach((item) => {
@@ -66,7 +71,6 @@ export default function App() {
     alert('⚡ 모든 항목 및 코멘트가 자동 채워졌습니다!');
   };
 
-  // 모바일 무한 로딩 해결 (try-catch-finally 예외 처리 강화)
   const fetchLibrary = async () => {
     setIsLoadingLibrary(true);
     try {
@@ -268,14 +272,6 @@ export default function App() {
     return tempCanvas.toDataURL('image/png');
   };
 
-  // 날짜 + 시간(HH:mm) 자동 결합
-  const getFullInspectionDateTime = (baseDate: string) => {
-    const now = new Date();
-    const hours = String(now.getHours()).padStart(2, '0');
-    const minutes = String(now.getMinutes()).padStart(2, '0');
-    return `${baseDate} ${hours}:${minutes}`;
-  };
-
   const handleSubmit = async () => {
     if (!validateBasicInfo()) return;
     setIsSubmitting(true);
@@ -285,7 +281,8 @@ export default function App() {
       const ownerSig = getWhiteBgSignature(ownerSigRef);
 
       const calculated = calculateScores();
-      const fullDateTime = getFullInspectionDateTime(inspectionDate);
+      // ⏰ 날짜 + 시간(HH:mm) 확실하게 결합
+      const fullDateTime = `${inspectionDate} ${inspectionTime}`;
 
       const payload = {
         inspection_date: fullDateTime,
@@ -303,7 +300,7 @@ export default function App() {
         owner_comment: ownerComment,
         details: scores,
         evidence_photos: photos,
-        language: lang
+        language: lang // 언어 설정 기록 (en이면 외국인용 영문 보고서로 렌더링)
       };
 
       const { error } = await supabase.from('inspections').insert([payload]).select();
@@ -500,7 +497,7 @@ export default function App() {
       
       const label = matchedOpt 
         ? (isReportEn ? (matchedOpt.labelEn || matchedOpt.label) : matchedOpt.label) 
-        : (val !== undefined ? `${val}점` : '미평가');
+        : (val !== undefined ? `${val}pts` : (isReportEn ? 'Unrated' : '미평가'));
 
       const taskText = isReportEn ? (item.taskEn || item.task) : item.task;
       const categoryText = isReportEn 
@@ -560,7 +557,7 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-800 pb-28">
-      {/* 🖨️ PDF 인쇄 시 하단 잘림 방지 CSS 규격 */}
+      {/* 🖨️ PDF 인쇄 잘림 방지 CSS 규격 */}
       <style>{`
         @media print {
           body { background: white !important; padding: 0 !important; margin: 0 !important; }
@@ -578,7 +575,7 @@ export default function App() {
         }
       `}</style>
 
-      {/* 시스템 UI 한글 고정 헤더 */}
+      {/* 한국인 전용 입력 시스템 UI 헤더 */}
       <header className="bg-white border-b border-slate-200 sticky top-0 z-30 shadow-sm print:hidden">
         <div className="max-w-7xl mx-auto px-3.5 py-2.5 flex flex-wrap items-center justify-between gap-2.5">
           <div className="flex items-center gap-1.5">
@@ -597,14 +594,15 @@ export default function App() {
               더미 채우기
             </button>
 
+            {/* 🌐 결과 리포트 언어 설정 토글 */}
             <button
               onClick={() => setLang(l => l === 'ko' ? 'en' : 'ko')}
               className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-bold border transition-all ${
-                isItemListEn ? 'bg-blue-600 text-white border-blue-600 shadow-sm' : 'bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100'
+                isItemListEn ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm' : 'bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100'
               }`}
             >
               <Globe className="w-3 h-3" />
-              {isItemListEn ? '점검표: English' : '점검표: 한국어'}
+              {isItemListEn ? '보고서 언어: English' : '보고서 언어: 한국어'}
             </button>
 
             <div className="flex items-center gap-1 bg-slate-100 px-2 py-1 rounded-lg text-xs">
@@ -627,6 +625,8 @@ export default function App() {
                 className="bg-transparent border-none outline-none w-16 sm:w-24 font-medium placeholder:text-slate-400 text-xs"
               />
             </div>
+            
+            {/* ⏰ 날짜 + 시간 선택창 */}
             <div className="flex items-center gap-1 bg-slate-100 px-2 py-1 rounded-lg text-xs">
               <Calendar className="w-3.5 h-3.5 text-slate-500" />
               <input
@@ -634,6 +634,12 @@ export default function App() {
                 value={inspectionDate}
                 onChange={(e) => setInspectionDate(e.target.value)}
                 className="bg-transparent border-none outline-none font-medium text-slate-600 text-xs w-24 sm:w-auto"
+              />
+              <input
+                type="time"
+                value={inspectionTime}
+                onChange={(e) => setInspectionTime(e.target.value)}
+                className="bg-transparent border-none outline-none font-bold text-blue-600 text-xs w-16"
               />
             </div>
           </div>
@@ -679,7 +685,9 @@ export default function App() {
         {activeTab === 'hall' && (
           <div>
             <div className="flex items-center justify-between mb-3">
-              <h2 className="text-base sm:text-lg font-bold text-slate-800">홀 (Hall) 점검 항목</h2>
+              <h2 className="text-base sm:text-lg font-bold text-slate-800">
+                {isItemListEn ? 'Hall Audit Items' : '홀 (Hall) 점검 항목'}
+              </h2>
               <span className="text-[10px] sm:text-xs font-bold px-2 py-0.5 bg-slate-200 text-slate-600 rounded">WEIGHT 50%</span>
             </div>
             {renderItemGroups(HALL_ITEMS)}
@@ -689,7 +697,9 @@ export default function App() {
         {activeTab === 'kitchen' && (
           <div>
             <div className="flex items-center justify-between mb-3">
-              <h2 className="text-base sm:text-lg font-bold text-slate-800">주방 (Kitchen) 점검 항목</h2>
+              <h2 className="text-base sm:text-lg font-bold text-slate-800">
+                {isItemListEn ? 'Kitchen Audit Items' : '주방 (Kitchen) 점검 항목'}
+              </h2>
               <span className="text-[10px] sm:text-xs font-bold px-2 py-0.5 bg-slate-200 text-slate-600 rounded">WEIGHT 50%</span>
             </div>
             {renderItemGroups(KITCHEN_ITEMS)}
@@ -722,19 +732,19 @@ export default function App() {
               </div>
             </div>
 
-            {/* 이슈 및 요청사항 코멘트 입력 영역 */}
+            {/* 코멘트 영역 */}
             <div className="bg-white p-4 rounded-xl border border-slate-200 space-y-3 shadow-sm">
               <h3 className="text-xs sm:text-sm font-bold text-slate-800 flex items-center gap-1.5 border-b pb-2">
                 <MessageSquare className="w-4 h-4 text-blue-600" />
-                이슈 및 요청사항
+                이슈 및 요청사항 (Issues &amp; Comments)
               </h3>
 
               <div className="space-y-2">
                 <div>
-                  <label className="text-[11px] font-bold text-slate-600 block mb-1">담당자 코멘트</label>
+                  <label className="text-[11px] font-bold text-slate-600 block mb-1">담당자 코멘트 (Manager Comment)</label>
                   <textarea
                     rows={2}
-                    placeholder="담당자 점검 소감 및 개선 요청사항 작성..."
+                    placeholder="담당자 점검 소감 및 개선 요청사항..."
                     value={managerComment}
                     onChange={(e) => setManagerComment(e.target.value)}
                     className="w-full p-2.5 text-xs bg-slate-50 border border-slate-200 rounded-lg outline-none focus:border-blue-500 transition-all resize-none"
@@ -742,10 +752,10 @@ export default function App() {
                 </div>
 
                 <div>
-                  <label className="text-[11px] font-bold text-slate-600 block mb-1">가맹점(점주) 코멘트</label>
+                  <label className="text-[11px] font-bold text-slate-600 block mb-1">가맹점 코멘트 (Franchise/Owner Comment)</label>
                   <textarea
                     rows={2}
-                    placeholder="가맹점주 의견 및 지원 필요사항 작성..."
+                    placeholder="가맹점주 의견 및 지원 필요사항..."
                     value={ownerComment}
                     onChange={(e) => setOwnerComment(e.target.value)}
                     className="w-full p-2.5 text-xs bg-slate-50 border border-slate-200 rounded-lg outline-none focus:border-blue-500 transition-all resize-none"
@@ -817,11 +827,18 @@ export default function App() {
                   <div key={item.id} className="bg-white p-4 sm:p-5 rounded-2xl border border-slate-200 shadow-sm hover:shadow-md transition-all relative">
                     <div className="flex items-start justify-between border-b border-slate-100 pb-2.5 mb-2.5">
                       <div>
-                        <span className="text-[10px] sm:text-xs font-bold px-2 py-0.5 bg-blue-50 text-blue-600 rounded">
-                          {item.branch_name || '지점 미지정'}
-                        </span>
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-[10px] sm:text-xs font-bold px-2 py-0.5 bg-blue-50 text-blue-600 rounded">
+                            {item.branch_name || '지점 미지정'}
+                          </span>
+                          {item.language === 'en' && (
+                            <span className="text-[10px] font-bold px-1.5 py-0.5 bg-indigo-100 text-indigo-700 rounded">
+                              EN Report
+                            </span>
+                          )}
+                        </div>
                         
-                        {/* 점검 일시(날짜 + 시간) 표시 */}
+                        {/* ⏰ 시:분 포함 표기 */}
                         <h3 className="font-bold text-slate-800 text-sm sm:text-base mt-1 flex items-center gap-1">
                           <Clock className="w-3.5 h-3.5 text-slate-400" />
                           {item.inspection_date}
@@ -966,231 +983,238 @@ export default function App() {
         </div>
       )}
 
-      {/* 모바일 세로 지원 & PDF 인쇄 잘림 방지 반영 상세 보고서 모달 */}
-      {selectedInspection && (
-        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-2 sm:p-4 overflow-y-auto print-modal-overlay">
-          <div className="bg-white rounded-2xl max-w-4xl w-full p-3.5 sm:p-6 shadow-2xl relative my-4 sm:my-8 max-h-[95vh] overflow-y-auto print-modal-container">
-            
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-3 border-b border-slate-200 sticky top-0 bg-white z-10 print:hidden gap-2">
-              <h3 className="font-bold text-slate-800 text-sm sm:text-lg">
-                {isEditing ? '✏️ 점검 리포트 수정 중' : '상세 QSC 점검 리포트'}
-              </h3>
+      {/* 🌐 언어 상태(ko/en)에 따라 전체 영문/한글 변경되는 상세 보고서 모달 */}
+      {selectedInspection && (() => {
+        const isReportEn = selectedInspection.language === 'en';
+
+        return (
+          <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-2 sm:p-4 overflow-y-auto print-modal-overlay">
+            <div className="bg-white rounded-2xl max-w-4xl w-full p-3.5 sm:p-6 shadow-2xl relative my-4 sm:my-8 max-h-[95vh] overflow-y-auto print-modal-container">
               
-              <div className="flex items-center gap-1.5 flex-wrap justify-end">
-                {!isEditing ? (
-                  <>
-                    <button
-                      onClick={() => startEditing(selectedInspection)}
-                      className="bg-amber-500 hover:bg-amber-600 text-white text-[11px] sm:text-xs font-bold px-2 py-1.5 rounded-lg flex items-center gap-1 shadow"
-                    >
-                      <Edit3 className="w-3 h-3" />
-                      <span>수정</span>
-                    </button>
-                    <button
-                      onClick={handlePrintPDF}
-                      className="bg-indigo-600 hover:bg-indigo-700 text-white text-[11px] sm:text-xs font-bold px-2 py-1.5 rounded-lg flex items-center gap-1 shadow"
-                    >
-                      <Printer className="w-3 h-3" />
-                      <span>PDF / 인쇄</span>
-                    </button>
-                    <button
-                      onClick={() => handleDeleteInspection(selectedInspection.id, selectedInspection.branch_name, selectedInspection.inspection_date)}
-                      className="bg-red-50 text-red-600 hover:bg-red-100 text-[11px] sm:text-xs font-bold px-2 py-1.5 rounded-lg flex items-center gap-1"
-                    >
-                      <Trash2 className="w-3 h-3" />
-                      <span>삭제</span>
-                    </button>
-                  </>
-                ) : (
-                  <>
-                    <button
-                      onClick={handleSaveEdit}
-                      className="bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] sm:text-xs font-bold px-3 py-1.5 rounded-lg flex items-center gap-1 shadow"
-                    >
-                      <Save className="w-3.5 h-3.5" />
-                      <span>수정 저장</span>
-                    </button>
-                    <button
-                      onClick={() => setIsEditing(false)}
-                      className="bg-slate-200 text-slate-700 text-[11px] sm:text-xs font-bold px-2.5 py-1.5 rounded-lg"
-                    >
-                      취소
-                    </button>
-                  </>
-                )}
-                <button onClick={() => setSelectedInspection(null)} className="text-slate-400 hover:text-slate-600 p-1 ml-1">
-                  <X className="w-5 h-5" />
-                </button>
-              </div>
-            </div>
-
-            <div className="py-3 sm:py-6 space-y-4 sm:space-y-6">
-              <div className="text-center border-b pb-3">
-                <h2 className="text-lg sm:text-2xl font-black text-slate-900">
-                  QSC 점검 종합 평가 리포트
-                </h2>
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-3 border-b border-slate-200 sticky top-0 bg-white z-10 print:hidden gap-2">
+                <h3 className="font-bold text-slate-800 text-sm sm:text-lg">
+                  {isEditing 
+                    ? (isReportEn ? '✏️ Editing Report' : '✏️ 점검 리포트 수정 중') 
+                    : (isReportEn ? 'QSC Inspection Report' : '상세 QSC 점검 리포트')
+                  }
+                </h3>
                 
-                {isEditing ? (
-                  <div className="mt-1.5 inline-flex items-center gap-1.5 bg-slate-100 px-2.5 py-1 rounded-lg">
-                    <span className="text-[11px] font-bold text-slate-500">점검 일시:</span>
-                    <input
-                      type="text"
-                      value={editInspectionDate}
-                      onChange={(e) => setEditInspectionDate(e.target.value)}
-                      className="bg-white border rounded px-1.5 py-0.5 text-xs font-bold text-slate-800 w-36"
-                    />
+                <div className="flex items-center gap-1.5 flex-wrap justify-end">
+                  {!isEditing ? (
+                    <>
+                      <button
+                        onClick={() => startEditing(selectedInspection)}
+                        className="bg-amber-500 hover:bg-amber-600 text-white text-[11px] sm:text-xs font-bold px-2 py-1.5 rounded-lg flex items-center gap-1 shadow"
+                      >
+                        <Edit3 className="w-3 h-3" />
+                        <span>{isReportEn ? 'Edit' : '수정'}</span>
+                      </button>
+                      <button
+                        onClick={handlePrintPDF}
+                        className="bg-indigo-600 hover:bg-indigo-700 text-white text-[11px] sm:text-xs font-bold px-2 py-1.5 rounded-lg flex items-center gap-1 shadow"
+                      >
+                        <Printer className="w-3 h-3" />
+                        <span>{isReportEn ? 'PDF' : 'PDF / 인쇄'}</span>
+                      </button>
+                      <button
+                        onClick={() => handleDeleteInspection(selectedInspection.id, selectedInspection.branch_name, selectedInspection.inspection_date)}
+                        className="bg-red-50 text-red-600 hover:bg-red-100 text-[11px] sm:text-xs font-bold px-2 py-1.5 rounded-lg flex items-center gap-1"
+                      >
+                        <Trash2 className="w-3 h-3" />
+                        <span>{isReportEn ? 'Delete' : '삭제'}</span>
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <button
+                        onClick={handleSaveEdit}
+                        className="bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] sm:text-xs font-bold px-3 py-1.5 rounded-lg flex items-center gap-1 shadow"
+                      >
+                        <Save className="w-3.5 h-3.5" />
+                        <span>{isReportEn ? 'Save' : '수정 저장'}</span>
+                      </button>
+                      <button
+                        onClick={() => setIsEditing(false)}
+                        className="bg-slate-200 text-slate-700 text-[11px] sm:text-xs font-bold px-2.5 py-1.5 rounded-lg"
+                      >
+                        {isReportEn ? 'Cancel' : '취소'}
+                      </button>
+                    </>
+                  )}
+                  <button onClick={() => setSelectedInspection(null)} className="text-slate-400 hover:text-slate-600 p-1 ml-1">
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+              </div>
+
+              <div className="py-3 sm:py-6 space-y-4 sm:space-y-6">
+                <div className="text-center border-b pb-3">
+                  <h2 className="text-lg sm:text-2xl font-black text-slate-900">
+                    {isReportEn ? 'QSC Audit Evaluation Report' : 'QSC 점검 종합 평가 리포트'}
+                  </h2>
+                  
+                  {isEditing ? (
+                    <div className="mt-1.5 inline-flex items-center gap-1.5 bg-slate-100 px-2.5 py-1 rounded-lg">
+                      <span className="text-[11px] font-bold text-slate-500">{isReportEn ? 'Date & Time:' : '점검 일시:'}</span>
+                      <input
+                        type="text"
+                        value={editInspectionDate}
+                        onChange={(e) => setEditInspectionDate(e.target.value)}
+                        className="bg-white border rounded px-1.5 py-0.5 text-xs font-bold text-slate-800 w-36"
+                      />
+                    </div>
+                  ) : (
+                    <p className="text-xs sm:text-sm text-slate-500 mt-1 flex items-center justify-center gap-1">
+                      <Clock className="w-3.5 h-3.5 text-slate-400" />
+                      {isReportEn ? 'Inspection Date & Time:' : '점검 일시:'} {selectedInspection.inspection_date}
+                    </p>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-2 gap-2 sm:gap-4 bg-slate-50 p-2.5 sm:p-4 rounded-xl text-xs sm:text-sm border border-slate-200">
+                  <div>
+                    <span className="font-bold text-slate-700 mr-1">{isReportEn ? 'Branch:' : '지점명:'}</span> 
+                    {isEditing ? (
+                      <input
+                        type="text"
+                        value={editBranchName}
+                        onChange={(e) => setEditBranchName(e.target.value)}
+                        className="bg-white border rounded px-1.5 py-0.5 text-xs font-bold text-slate-800 w-28 sm:w-44"
+                      />
+                    ) : (
+                      selectedInspection.branch_name
+                    )}
                   </div>
-                ) : (
-                  <p className="text-xs sm:text-sm text-slate-500 mt-1 flex items-center justify-center gap-1">
-                    <Clock className="w-3.5 h-3.5 text-slate-400" />
-                    점검 일시: {selectedInspection.inspection_date}
-                  </p>
-                )}
-              </div>
+                  <div>
+                    <span className="font-bold text-slate-700 mr-1">{isReportEn ? 'Inspector:' : '점검자:'}</span> 
+                    {isEditing ? (
+                      <input
+                        type="text"
+                        value={editInspectorName}
+                        onChange={(e) => setEditInspectorName(e.target.value)}
+                        className="bg-white border rounded px-1.5 py-0.5 text-xs font-bold text-slate-800 w-24 sm:w-36"
+                      />
+                    ) : (
+                      selectedInspection.inspector_name
+                    )}
+                  </div>
+                </div>
 
-              <div className="grid grid-cols-2 gap-2 sm:gap-4 bg-slate-50 p-2.5 sm:p-4 rounded-xl text-xs sm:text-sm border border-slate-200">
-                <div>
-                  <span className="font-bold text-slate-700 mr-1">지점명:</span> 
-                  {isEditing ? (
-                    <input
-                      type="text"
-                      value={editBranchName}
-                      onChange={(e) => setEditBranchName(e.target.value)}
-                      className="bg-white border rounded px-1.5 py-0.5 text-xs font-bold text-slate-800 w-28 sm:w-44"
-                    />
-                  ) : (
-                    selectedInspection.branch_name
-                  )}
+                <div className="grid grid-cols-3 gap-1.5 sm:gap-2 text-center bg-blue-50/50 p-2.5 sm:p-4 rounded-xl border border-blue-100">
+                  <div>
+                    <p className="text-[10px] sm:text-xs font-bold text-slate-500">{isReportEn ? 'Hall Score' : '홀 점수'}</p>
+                    <p className="text-sm sm:text-xl font-black text-slate-800 mt-0.5">
+                      {isEditing ? calculateScores(editDetails).hallScore : selectedInspection.hall_score} {isReportEn ? 'pts' : '점'}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-[10px] sm:text-xs font-bold text-slate-500">{isReportEn ? 'Kitchen Score' : '주방 점수'}</p>
+                    <p className="text-sm sm:text-xl font-black text-slate-800 mt-0.5">
+                      {isEditing ? calculateScores(editDetails).kitchenScore : selectedInspection.kitchen_score} {isReportEn ? 'pts' : '점'}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-[10px] sm:text-xs font-bold text-slate-500">{isReportEn ? 'Total Score' : '최종 점수'}</p>
+                    <p className="text-sm sm:text-xl font-black text-blue-600 mt-0.5">
+                      {isEditing ? calculateScores(editDetails).finalScore : selectedInspection.final_score} {isReportEn ? 'pts' : '점'}
+                    </p>
+                  </div>
                 </div>
-                <div>
-                  <span className="font-bold text-slate-700 mr-1">점검자:</span> 
-                  {isEditing ? (
-                    <input
-                      type="text"
-                      value={editInspectorName}
-                      onChange={(e) => setEditInspectorName(e.target.value)}
-                      className="bg-white border rounded px-1.5 py-0.5 text-xs font-bold text-slate-800 w-24 sm:w-36"
-                    />
-                  ) : (
-                    selectedInspection.inspector_name
-                  )}
-                </div>
-              </div>
 
-              <div className="grid grid-cols-3 gap-1.5 sm:gap-2 text-center bg-blue-50/50 p-2.5 sm:p-4 rounded-xl border border-blue-100">
-                <div>
-                  <p className="text-[10px] sm:text-xs font-bold text-slate-500">홀 점수</p>
-                  <p className="text-sm sm:text-xl font-black text-slate-800 mt-0.5">
-                    {isEditing ? calculateScores(editDetails).hallScore : selectedInspection.hall_score}점
-                  </p>
+                <div className="space-y-1.5">
+                  <h4 className="text-xs sm:text-sm font-bold text-slate-800 flex items-center gap-1.5">
+                    <span className="w-1.5 h-1.5 rounded-full bg-blue-600"></span> 
+                    {isReportEn ? 'Detailed Checklist Items' : '세부 점검 항목 평가 내역'}
+                  </h4>
+                  
+                  <div className="border border-slate-200 rounded-lg overflow-x-auto">
+                    <table className="w-full text-left border-collapse min-w-[340px]">
+                      <thead>
+                        <tr className="bg-slate-100 text-slate-700 text-[10px] sm:text-xs font-bold border-b border-slate-200">
+                          <th className="p-1.5 text-center w-8 border-r border-slate-200">No.</th>
+                          <th className="p-1.5 border-r border-slate-200">{isReportEn ? 'Category' : '카테고리'}</th>
+                          <th className="p-1.5 border-r border-slate-200">{isReportEn ? 'Checklist Item' : '점검 항목 내용'}</th>
+                          <th className="p-1.5 text-center border-r border-slate-200">{isReportEn ? 'Result' : '평가 결과'}</th>
+                          <th className="p-1.5 text-center">{isReportEn ? 'Photo' : '첨부 사진'}</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {renderDetailReportItems(selectedInspection.details, selectedInspection.evidence_photos, selectedInspection.language)}
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
-                <div>
-                  <p className="text-[10px] sm:text-xs font-bold text-slate-500">주방 점수</p>
-                  <p className="text-sm sm:text-xl font-black text-slate-800 mt-0.5">
-                    {isEditing ? calculateScores(editDetails).kitchenScore : selectedInspection.kitchen_score}점
-                  </p>
-                </div>
-                <div>
-                  <p className="text-[10px] sm:text-xs font-bold text-slate-500">최종 점수</p>
-                  <p className="text-sm sm:text-xl font-black text-blue-600 mt-0.5">
-                    {isEditing ? calculateScores(editDetails).finalScore : selectedInspection.final_score}점
-                  </p>
-                </div>
-              </div>
 
-              <div className="space-y-1.5">
-                <h4 className="text-xs sm:text-sm font-bold text-slate-800 flex items-center gap-1.5">
-                  <span className="w-1.5 h-1.5 rounded-full bg-blue-600"></span> 
-                  세부 점검 항목 평가 내역
-                </h4>
-                
-                <div className="border border-slate-200 rounded-lg overflow-x-auto">
-                  <table className="w-full text-left border-collapse min-w-[340px]">
-                    <thead>
-                      <tr className="bg-slate-100 text-slate-700 text-[10px] sm:text-xs font-bold border-b border-slate-200">
-                        <th className="p-1.5 text-center w-8 border-r border-slate-200">No.</th>
-                        <th className="p-1.5 border-r border-slate-200">카테고리</th>
-                        <th className="p-1.5 border-r border-slate-200">점검 항목 내용</th>
-                        <th className="p-1.5 text-center border-r border-slate-200">평가 결과</th>
-                        <th className="p-1.5 text-center">첨부 사진</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {renderDetailReportItems(selectedInspection.details, selectedInspection.evidence_photos, selectedInspection.language)}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
+                {/* 이슈 및 요청사항 영문/한글 표현 대응 */}
+                <div className="space-y-1.5 pt-2">
+                  <h4 className="text-xs sm:text-sm font-bold text-slate-800 flex items-center gap-1.5">
+                    <span className="w-1.5 h-1.5 rounded-full bg-blue-600"></span> 
+                    {isReportEn ? 'Issues & Requests' : '이슈 및 요청사항'}
+                  </h4>
 
-              {/* 이슈 및 요청사항 리포트 노출 및 수정 영역 */}
-              <div className="space-y-1.5 pt-2">
-                <h4 className="text-xs sm:text-sm font-bold text-slate-800 flex items-center gap-1.5">
-                  <span className="w-1.5 h-1.5 rounded-full bg-blue-600"></span> 
-                  이슈 및 요청사항
-                </h4>
-
-                <div className="border border-slate-300 rounded-lg overflow-hidden text-xs">
-                  <table className="w-full border-collapse">
-                    <tbody>
-                      <tr className="border-b border-slate-200">
-                        <td className="w-24 bg-slate-100 font-bold text-slate-700 p-2.5 text-center border-r border-slate-300">
-                          담당자
-                        </td>
-                        <td className="p-2.5 text-slate-800 font-medium bg-white">
-                          {isEditing ? (
-                            <textarea
-                              rows={2}
-                              value={editManagerComment}
-                              onChange={(e) => setEditManagerComment(e.target.value)}
-                              className="w-full p-2 border rounded text-xs outline-none"
-                              placeholder="담당자 코멘트 작성..."
-                            />
-                          ) : (
-                            selectedInspection.manager_comment || <span className="text-slate-300">내용 없음</span>
-                          )}
-                        </td>
-                      </tr>
-                      <tr>
-                        <td className="w-24 bg-slate-100 font-bold text-slate-700 p-2.5 text-center border-r border-slate-300">
-                          가맹점
-                        </td>
-                        <td className="p-2.5 text-slate-800 font-medium bg-white">
-                          {isEditing ? (
-                            <textarea
-                              rows={2}
-                              value={editOwnerComment}
-                              onChange={(e) => setEditOwnerComment(e.target.value)}
-                              className="w-full p-2 border rounded text-xs outline-none"
-                              placeholder="가맹점 코멘트 작성..."
-                            />
-                          ) : (
-                            selectedInspection.owner_comment || <span className="text-slate-300">내용 없음</span>
-                          )}
-                        </td>
-                      </tr>
-                    </tbody>
-                  </table>
+                  <div className="border border-slate-300 rounded-lg overflow-hidden text-xs">
+                    <table className="w-full border-collapse">
+                      <tbody>
+                        <tr className="border-b border-slate-200">
+                          <td className="w-28 bg-slate-100 font-bold text-slate-700 p-2.5 text-center border-r border-slate-300">
+                            {isReportEn ? 'Manager' : '담당자'}
+                          </td>
+                          <td className="p-2.5 text-slate-800 font-medium bg-white">
+                            {isEditing ? (
+                              <textarea
+                                rows={2}
+                                value={editManagerComment}
+                                onChange={(e) => setEditManagerComment(e.target.value)}
+                                className="w-full p-2 border rounded text-xs outline-none"
+                                placeholder={isReportEn ? 'Manager comment...' : '담당자 코멘트...'}
+                              />
+                            ) : (
+                              selectedInspection.manager_comment || <span className="text-slate-300">{isReportEn ? 'N/A' : '내용 없음'}</span>
+                            )}
+                          </td>
+                        </tr>
+                        <tr>
+                          <td className="w-28 bg-slate-100 font-bold text-slate-700 p-2.5 text-center border-r border-slate-300">
+                            {isReportEn ? 'Franchise' : '가맹점'}
+                          </td>
+                          <td className="p-2.5 text-slate-800 font-medium bg-white">
+                            {isEditing ? (
+                              <textarea
+                                rows={2}
+                                value={editOwnerComment}
+                                onChange={(e) => setEditOwnerComment(e.target.value)}
+                                className="w-full p-2 border rounded text-xs outline-none"
+                                placeholder={isReportEn ? 'Franchise comment...' : '가맹점 코멘트...'}
+                              />
+                            ) : (
+                              selectedInspection.owner_comment || <span className="text-slate-300">{isReportEn ? 'N/A' : '내용 없음'}</span>
+                            )}
+                          </td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
-              </div>
 
-              <div className="grid grid-cols-2 gap-3 pt-3 border-t border-slate-200">
-                <div className="text-center">
-                  <p className="text-[11px] font-bold text-slate-600 mb-1.5">점검자 서명</p>
-                  {selectedInspection.manager_signature ? (
-                    <img src={selectedInspection.manager_signature} alt="점검자 서명" className="h-16 sm:h-20 mx-auto object-contain border rounded-lg bg-white shadow-sm p-1" />
-                  ) : <span className="text-[10px] text-slate-400">N/A</span>}
-                </div>
-                <div className="text-center">
-                  <p className="text-[11px] font-bold text-slate-600 mb-1.5">점주/매니저 서명</p>
-                  {selectedInspection.owner_signature ? (
-                    <img src={selectedInspection.owner_signature} alt="점주 서명" className="h-16 sm:h-20 mx-auto object-contain border rounded-lg bg-white shadow-sm p-1" />
-                  ) : <span className="text-[10px] text-slate-400">N/A</span>}
+                <div className="grid grid-cols-2 gap-3 pt-3 border-t border-slate-200">
+                  <div className="text-center">
+                    <p className="text-[11px] font-bold text-slate-600 mb-1.5">{isReportEn ? 'Inspector Sig' : '점검자 서명'}</p>
+                    {selectedInspection.manager_signature ? (
+                      <img src={selectedInspection.manager_signature} alt="점검자 서명" className="h-16 sm:h-20 mx-auto object-contain border rounded-lg bg-white shadow-sm p-1" />
+                    ) : <span className="text-[10px] text-slate-400">N/A</span>}
+                  </div>
+                  <div className="text-center">
+                    <p className="text-[11px] font-bold text-slate-600 mb-1.5">{isReportEn ? 'Owner/Manager Sig' : '점주/매니저 서명'}</p>
+                    {selectedInspection.owner_signature ? (
+                      <img src={selectedInspection.owner_signature} alt="점주 서명" className="h-16 sm:h-20 mx-auto object-contain border rounded-lg bg-white shadow-sm p-1" />
+                    ) : <span className="text-[10px] text-slate-400">N/A</span>}
+                  </div>
                 </div>
               </div>
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* 사진 크게 보기 팝업 */}
       {enlargedImage && (
