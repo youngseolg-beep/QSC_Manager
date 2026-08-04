@@ -1,33 +1,30 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef } from 'react';
 import { 
   Building2, User, Calendar, CheckCircle2, 
   RotateCcw, Send, ShieldCheck, ChevronRight, Camera, X, RefreshCw, Save
 } from 'lucide-react';
 import SignatureCanvas from 'react-signature-canvas';
 
-// data.ts의 모든 데이터 유연하게 가져오기
 import * as DataModule from './data';
 import { supabase } from './utils/supabase';
 
-// 데이터 자동 추출 (어떤 형태로 export 되어있든 100% 추출)
-const rawData: any = DataModule.default || DataModule;
-const allExportedArrays = Object.values(DataModule).filter(v => Array.isArray(v)) as any[][];
-const combinedItems = allExportedArrays.flat();
+// 데이터 추출 및 매핑
+const allArrays = Object.values(DataModule).filter(v => Array.isArray(v)) as any[][];
+const combinedItems = allArrays.flat();
 
 let HALL_ITEMS: any[] = DataModule.HALL_ITEMS || DataModule.hallItems || DataModule.hall_items || [];
 let KITCHEN_ITEMS: any[] = DataModule.KITCHEN_ITEMS || DataModule.kitchenItems || DataModule.kitchen_items || [];
 
-// 독립 배열이 없을 경우 전체 배열에서 자동 분리
 if (HALL_ITEMS.length === 0 && KITCHEN_ITEMS.length === 0 && combinedItems.length > 0) {
   HALL_ITEMS = combinedItems.filter((i: any) => 
-    String(i.category || i.type || '').includes('홀') || 
-    String(i.category || i.type || '').toLowerCase().includes('hall') ||
-    (typeof i.id === 'number' && i.id <= 17)
+    String(i.category || i.type || i.id || '').includes('h_') || 
+    String(i.category || i.type || '').includes('홀') ||
+    String(i.category || i.type || '').toLowerCase().includes('hall')
   );
   KITCHEN_ITEMS = combinedItems.filter((i: any) => 
-    String(i.category || i.type || '').includes('주방') || 
-    String(i.category || i.type || '').toLowerCase().includes('kitchen') ||
-    (typeof i.id === 'number' && i.id > 17)
+    String(i.category || i.type || i.id || '').includes('k_') || 
+    String(i.category || i.type || '').includes('주방') ||
+    String(i.category || i.type || '').toLowerCase().includes('kitchen')
   );
   if (HALL_ITEMS.length === 0) HALL_ITEMS = combinedItems;
 }
@@ -47,7 +44,7 @@ export default function App() {
   const ownerSigRef = useRef<any>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // 미체크 항목 식별
+  // 미체크 항목 추출
   const getUncheckedItems = (items: any[]) => {
     return items.filter(item => scores[item.id] === undefined);
   };
@@ -55,7 +52,7 @@ export default function App() {
   const isHallComplete = HALL_ITEMS.length > 0 && HALL_ITEMS.every(item => scores[item.id] !== undefined);
   const isKitchenComplete = KITCHEN_ITEMS.length > 0 && KITCHEN_ITEMS.every(item => scores[item.id] !== undefined);
 
-  // 기본 정보 입력 검증
+  // 기본 정보 입력 체크
   const validateBasicInfo = () => {
     if (!branchName.trim()) {
       alert('⚠️ 지점명을 입력해 주세요.');
@@ -68,31 +65,28 @@ export default function App() {
     return true;
   };
 
-  // 홀 완료 버튼 클릭 시
   const handleHallComplete = () => {
     if (!validateBasicInfo()) return;
     const unchecked = getUncheckedItems(HALL_ITEMS);
     if (unchecked.length > 0) {
-      const numbers = unchecked.map(item => `${item.id}번`).join(', ');
+      const numbers = unchecked.map((item, idx) => `${idx + 1}번`).join(', ');
       alert(`⚠️ 홀 점검 미체크 항목이 있습니다.\n미체크 항목: [ ${numbers} ]`);
       return;
     }
     setActiveTab('kitchen');
   };
 
-  // 주방 완료 버튼 클릭 시
   const handleKitchenComplete = () => {
     if (!validateBasicInfo()) return;
     const unchecked = getUncheckedItems(KITCHEN_ITEMS);
     if (unchecked.length > 0) {
-      const numbers = unchecked.map(item => `${item.id}번`).join(', ');
+      const numbers = unchecked.map((item, idx) => `${idx + 1}번`).join(', ');
       alert(`⚠️ 주방 점검 미체크 항목이 있습니다.\n미체크 항목: [ ${numbers} ]`);
       return;
     }
     setActiveTab('final');
   };
 
-  // 점수 및 등급 계산
   const calculateScores = () => {
     const hallTotalMax = HALL_ITEMS.reduce((acc, item) => acc + (item.maxScore || 10), 0);
     const hallCurrent = HALL_ITEMS.reduce((acc, item) => acc + (scores[item.id] || 0), 0);
@@ -115,7 +109,6 @@ export default function App() {
     };
   };
 
-  // 초기화
   const handleReset = () => {
     if (confirm('평가 내용을 전체 초기화하시겠습니까?')) {
       setScores({});
@@ -128,7 +121,6 @@ export default function App() {
     }
   };
 
-  // 사진 업로드
   const handlePhotoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!activePhotoModalItem || !e.target.files) return;
     const files = Array.from(e.target.files);
@@ -150,7 +142,6 @@ export default function App() {
     });
   };
 
-  // DB 제출
   const handleSubmit = async () => {
     if (!validateBasicInfo()) return;
     setIsSubmitting(true);
@@ -159,10 +150,10 @@ export default function App() {
       let managerSig = '';
       let ownerSig = '';
 
-      if (managerSigRef.current && !managerSigRef.current.isEmpty()) {
+      if (managerSigRef.current && typeof managerSigRef.current.isEmpty === 'function' && !managerSigRef.current.isEmpty()) {
         managerSig = managerSigRef.current.getCanvas().toDataURL('image/png');
       }
-      if (ownerSigRef.current && !ownerSigRef.current.isEmpty()) {
+      if (ownerSigRef.current && typeof ownerSigRef.current.isEmpty === 'function' && !ownerSigRef.current.isEmpty()) {
         ownerSig = ownerSigRef.current.getCanvas().toDataURL('image/png');
       }
 
@@ -191,26 +182,25 @@ export default function App() {
       handleReset();
     } catch (err: any) {
       console.error(err);
-      alert(`⚠️ 저장 중 오류 발생: ${err.message || '알 수 없는 오류'}`);
+      alert(`⚠️ 저장 중 오류: ${err.message || '알 수 없는 오류'}`);
     } finally {
       setIsSubmitting(false);
     }
   };
 
-  // 카테고리/서브카테고리별 그룹화 렌더링 함수
   const renderItemGroups = (items: any[]) => {
     const categories: { [key: string]: { [key: string]: any[] } } = {};
     
     items.forEach(item => {
-      const cat = item.category || '점검 항목';
-      const sub = item.subcategory || item.subCategory || '일반';
+      const cat = item.category || item.categoryKr || '위생 및 시설';
+      const sub = item.subcategory || item.subCategory || item.subcategoryKr || '일반 점검';
       if (!categories[cat]) categories[cat] = {};
       if (!categories[cat][sub]) categories[cat][sub] = [];
       categories[cat][sub].push(item);
     });
 
     return Object.entries(categories).map(([catName, subCats]) => (
-      <div key={catName} className="mb-8 bg-white rounded-xl p-5 border border-slate-200 shadow-sm">
+      <div key={catName} className="mb-6 bg-white rounded-xl p-5 border border-slate-200 shadow-sm">
         <h3 className="text-base font-bold text-slate-800 pb-3 mb-4 border-b border-slate-100 flex items-center gap-2">
           <span className="w-2 h-2 rounded-full bg-blue-600"></span>
           {catName}
@@ -227,18 +217,20 @@ export default function App() {
               </h4>
 
               <div className="space-y-3">
-                {itemList.map((item) => {
+                {itemList.map((item, idx) => {
+                  // 💡 질문 문항 텍스트 자동 탐색 매핑
+                  const itemTitle = item.title || item.name || item.text || item.question || item.titleKr || item.label || item.id;
                   const itemPhotos = photos[item.id] || [];
+
                   return (
-                    <div key={item.id} className="p-3 bg-slate-50/50 rounded-lg border border-slate-200 flex flex-col md:flex-row md:items-center justify-between gap-3">
+                    <div key={item.id || idx} className="p-3.5 bg-slate-50/60 rounded-lg border border-slate-200 flex flex-col md:flex-row md:items-center justify-between gap-3">
                       <div className="flex-1">
                         <p className="text-sm font-medium text-slate-800">
-                          {item.id}. {item.title}
+                          <span className="font-bold mr-1">{idx + 1}.</span> {itemTitle}
                         </p>
                       </div>
 
-                      <div className="flex items-center gap-2 flex-wrap">
-                        {/* 평가 옵션 버튼들 */}
+                      <div className="flex items-center gap-2 flex-wrap justify-end">
                         <div className="flex items-center gap-1 bg-white p-1 rounded-lg border border-slate-200">
                           {(item.options || []).map((opt: any) => {
                             const val = opt.score ?? opt.val ?? 0;
@@ -259,7 +251,6 @@ export default function App() {
                           })}
                         </div>
 
-                        {/* 사진 첨부 버튼 */}
                         <button
                           onClick={() => setActivePhotoModalItem(item)}
                           className={`flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg border transition-all ${
@@ -269,7 +260,7 @@ export default function App() {
                           }`}
                         >
                           <Camera className="w-3.5 h-3.5" />
-                          <span>0/{itemPhotos.length > 0 ? itemPhotos.length : 3}</span>
+                          <span>{itemPhotos.length}/3</span>
                         </button>
                       </div>
                     </div>
@@ -277,7 +268,6 @@ export default function App() {
                 })}
               </div>
 
-              {/* 소계 점수 표시 */}
               <div className="text-right mt-2 text-xs text-slate-500 font-medium">
                 소계 <span className="font-bold text-slate-700">{subTotalCurrent}</span> / {subTotalMax}
               </div>
@@ -290,7 +280,6 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-800 pb-28">
-      {/* 상단 헤더 */}
       <header className="bg-white border-b border-slate-200 sticky top-0 z-30 shadow-sm">
         <div className="max-w-7xl mx-auto px-4 py-3 flex flex-wrap items-center justify-between gap-4">
           <div className="flex items-center gap-2">
@@ -333,7 +322,6 @@ export default function App() {
           </div>
         </div>
 
-        {/* 탭 메뉴 */}
         <div className="max-w-7xl mx-auto px-4 flex border-t border-slate-100">
           <button
             onClick={() => setActiveTab('hall')}
@@ -362,9 +350,7 @@ export default function App() {
         </div>
       </header>
 
-      {/* 메인 콘텐츠 */}
       <main className="max-w-7xl mx-auto px-4 py-6">
-        {/* 홀 점검 탭 */}
         {activeTab === 'hall' && (
           <div>
             <div className="flex items-center justify-between mb-4">
@@ -375,7 +361,6 @@ export default function App() {
           </div>
         )}
 
-        {/* 주방 점검 탭 */}
         {activeTab === 'kitchen' && (
           <div>
             <div className="flex items-center justify-between mb-4">
@@ -386,7 +371,6 @@ export default function App() {
           </div>
         )}
 
-        {/* 최종 서명 탭 */}
         {activeTab === 'final' && (
           <div className="space-y-6 max-w-3xl mx-auto">
             <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 grid grid-cols-3 gap-4 text-center">
@@ -446,7 +430,6 @@ export default function App() {
         )}
       </main>
 
-      {/* 하단 고정 액션 바 */}
       <footer className="fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 p-3 z-20 shadow-lg">
         <div className="max-w-7xl mx-auto flex items-center justify-between gap-4">
           <div className="flex items-center gap-3">
@@ -493,13 +476,12 @@ export default function App() {
         </div>
       </footer>
 
-      {/* 사진 첨부 모달 팝업 */}
       {activePhotoModalItem && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl p-5 max-w-md w-full shadow-2xl">
             <div className="flex items-center justify-between pb-3 border-b border-slate-100">
               <h3 className="font-bold text-slate-800 text-sm">
-                사진 첨부 ({activePhotoModalItem.id}. {activePhotoModalItem.title})
+                사진 첨부 ({activePhotoModalItem.title || activePhotoModalItem.name || activePhotoModalItem.id})
               </h3>
               <button onClick={() => setActivePhotoModalItem(null)} className="text-slate-400 hover:text-slate-600">
                 <X className="w-5 h-5" />
