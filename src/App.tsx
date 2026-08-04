@@ -34,7 +34,7 @@ export default function App() {
   const [editInspectionDate, setEditInspectionDate] = useState('');
   const [editDetails, setEditDetails] = useState<Record<string, number>>({});
 
-  // 이미지 확대(Zoom) 라이트박스 모달 상태
+  // 이미지 확대 라이트박스 모달 상태
   const [enlargedImage, setEnlargedImage] = useState<string | null>(null);
 
   const managerSigRef = useRef<any>(null);
@@ -188,6 +188,7 @@ export default function App() {
     document.body.removeChild(link);
   };
 
+  // 💡 [화질 개선 적용] 해상도 max 800px / JPEG 화질 75%로 상향
   const handlePhotoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!activePhotoModalItem || !e.target.files) return;
     const files = Array.from(e.target.files);
@@ -201,7 +202,7 @@ export default function App() {
         img.onload = () => {
           const canvas = document.createElement('canvas');
           const ctx = canvas.getContext('2d');
-          const maxDim = 400;
+          const maxDim = 800; // 800px로 해상도 상향
           let width = img.width;
           let height = img.height;
 
@@ -221,10 +222,11 @@ export default function App() {
           canvas.height = height;
           ctx?.drawImage(img, 0, 0, width, height);
           
-          const compressedBase64 = canvas.toDataURL('image/jpeg', 0.5);
+          // Quality 0.75(75%) 선명한 화질 제공
+          const highResBase64 = canvas.toDataURL('image/jpeg', 0.75);
 
           const filename = `QSC_${activePhotoModalItem.id}_${Date.now()}_${fIdx + 1}.jpg`;
-          downloadImageFile(compressedBase64, filename);
+          downloadImageFile(highResBase64, filename);
 
           setPhotos(prev => {
             const current = prev[activePhotoModalItem.id] || [];
@@ -232,10 +234,24 @@ export default function App() {
               alert('Max 3 photos allowed.');
               return prev;
             }
-            return { ...prev, [activePhotoModalItem.id]: [...current, compressedBase64] };
+            return { ...prev, [activePhotoModalItem.id]: [...current, highResBase64] };
           });
         };
       };
+    });
+  };
+
+  // 🗑️ 개별 사진 삭제 함수
+  const handleDeletePhoto = (itemId: string, photoIdx: number) => {
+    setPhotos(prev => {
+      const current = prev[itemId] || [];
+      const updated = current.filter((_, idx) => idx !== photoIdx);
+      if (updated.length === 0) {
+        const copy = { ...prev };
+        delete copy[itemId];
+        return copy;
+      }
+      return { ...prev, [itemId]: updated };
     });
   };
 
@@ -299,7 +315,6 @@ export default function App() {
     }
   };
 
-  // 🗑️ 리포트 삭제 함수
   const handleDeleteInspection = async (id: string, branch: string, date: string) => {
     if (!window.confirm(`정말 [${branch} (${date})] 리포트를 삭제하시겠습니까?`)) return;
 
@@ -317,7 +332,6 @@ export default function App() {
     }
   };
 
-  // ✏️ 수정 모드 시작
   const startEditing = (item: any) => {
     setIsEditing(true);
     setEditBranchName(item.branch_name || '');
@@ -326,7 +340,6 @@ export default function App() {
     setEditDetails(item.details || {});
   };
 
-  // 💾 수정사항 저장 함수
   const handleSaveEdit = async () => {
     if (!selectedInspection) return;
 
@@ -821,7 +834,7 @@ export default function App() {
         </div>
       </footer>
 
-      {/* 사진 첨부 모달 */}
+      {/* 📷 사진 첨부 모달 (삭제 버튼 포함) */}
       {activePhotoModalItem && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl p-5 max-w-md w-full shadow-2xl">
@@ -839,12 +852,22 @@ export default function App() {
                 {(photos[activePhotoModalItem.id] || []).map((img, idx) => (
                   <div key={idx} className="relative aspect-square rounded-lg overflow-hidden border border-slate-200 group">
                     <img src={img} alt="증빙" className="w-full h-full object-cover" />
+                    
+                    {/* 🗑️ 개별 사진 삭제 버튼 */}
+                    <button
+                      onClick={() => handleDeletePhoto(activePhotoModalItem.id, idx)}
+                      className="absolute top-1 right-1 bg-red-600 text-white rounded-full p-1 opacity-90 hover:opacity-100 hover:scale-110 transition-all shadow"
+                      title="사진 삭제"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+
                     <a
                       href={img}
                       download={`photo_${idx + 1}.jpg`}
-                      className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center text-white text-xs font-bold transition-opacity"
+                      className="absolute bottom-1 left-1 bg-black/60 text-white rounded p-1 opacity-0 group-hover:opacity-100 transition-opacity"
                     >
-                      <Download className="w-4 h-4" />
+                      <Download className="w-3 h-3" />
                     </a>
                   </div>
                 ))}
@@ -863,7 +886,7 @@ export default function App() {
                 onClick={() => fileInputRef.current?.click()}
                 className="w-full py-2.5 border-2 border-dashed border-slate-200 rounded-xl text-xs font-bold text-slate-600 flex items-center justify-center gap-1.5 hover:border-blue-500 hover:text-blue-600 transition-all"
               >
-                <Camera className="w-4 h-4" /> {isEn ? 'Take Photo or Choose File' : '사진 촬영 / 선택 (갤러리 자동 저장)'}
+                <Camera className="w-4 h-4" /> {isEn ? 'Take Photo or Choose File' : '선명한 사진 촬영 / 앨범 선택'}
               </button>
             </div>
 
