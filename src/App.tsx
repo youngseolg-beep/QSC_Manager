@@ -8,7 +8,7 @@ import SignatureCanvas from 'react-signature-canvas';
 import { CHECKLIST_ITEMS } from './data';
 import { supabase } from './utils/supabase';
 
-// 데이터 카테고리별 분리 (전체 연속 인덱스 매김)
+// 데이터 카테고리별 분리
 const HALL_ITEMS = CHECKLIST_ITEMS.filter(item => item.category === '홀').map((item, idx) => ({ ...item, globalIndex: idx + 1 }));
 const KITCHEN_ITEMS = CHECKLIST_ITEMS.filter(item => item.category === '주방').map((item, idx) => ({ ...item, globalIndex: idx + 1 }));
 
@@ -24,7 +24,6 @@ export default function App() {
   const [activePhotoModalItem, setActivePhotoModalItem] = useState<any | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // 보관함(Library) 목록 및 상세보기 모달
   const [savedInspections, setSavedInspections] = useState<any[]>([]);
   const [selectedInspection, setSelectedInspection] = useState<any | null>(null);
   const [isLoadingLibrary, setIsLoadingLibrary] = useState(false);
@@ -35,7 +34,7 @@ export default function App() {
 
   const isEn = lang === 'en';
 
-  // ⚡ 테스트용 더미 데이터 1초 자동 채우기 함수
+  // 더미 데이터 자동 채우기
   const fillDummyData = () => {
     setBranchName('강남 직영점(테스트)');
     setInspectorName('홍길동 매니저');
@@ -50,7 +49,6 @@ export default function App() {
     alert('⚡ 모든 항목이 [우수/준수]로 자동 채워졌습니다!');
   };
 
-  // 보관함 목록 불러오기
   const fetchLibrary = async () => {
     setIsLoadingLibrary(true);
     try {
@@ -62,7 +60,7 @@ export default function App() {
       if (error) throw error;
       setSavedInspections(data || []);
     } catch (err: any) {
-      console.error('Library Error:', err);
+      console.error('Library fetch error:', err);
     } finally {
       setIsLoadingLibrary(false);
     }
@@ -74,7 +72,6 @@ export default function App() {
     }
   }, [activeTab]);
 
-  // 미체크 항목 식별
   const getUncheckedItems = (items: any[]) => {
     return items.filter(item => scores[item.id] === undefined);
   };
@@ -82,7 +79,6 @@ export default function App() {
   const isHallComplete = HALL_ITEMS.length > 0 && HALL_ITEMS.every(item => scores[item.id] !== undefined);
   const isKitchenComplete = KITCHEN_ITEMS.length > 0 && KITCHEN_ITEMS.every(item => scores[item.id] !== undefined);
 
-  // 기본 정보 입력 검증
   const validateBasicInfo = () => {
     if (!branchName.trim()) {
       alert(isEn ? '⚠️ Please enter the branch name.' : '⚠️ 지점명을 입력해 주세요.');
@@ -95,7 +91,6 @@ export default function App() {
     return true;
   };
 
-  // 홀 완료
   const handleHallComplete = () => {
     if (!validateBasicInfo()) return;
     const unchecked = getUncheckedItems(HALL_ITEMS);
@@ -110,7 +105,6 @@ export default function App() {
     setActiveTab('kitchen');
   };
 
-  // 주방 완료
   const handleKitchenComplete = () => {
     if (!validateBasicInfo()) return;
     const unchecked = getUncheckedItems(KITCHEN_ITEMS);
@@ -125,7 +119,6 @@ export default function App() {
     setActiveTab('final');
   };
 
-  // 점수 계산
   const calculateScores = () => {
     const calcGroup = (items: any[]) => {
       let totalMax = 0;
@@ -195,7 +188,7 @@ export default function App() {
     });
   };
 
-  // DB 제출 (네트워크 에러 예외 보강)
+  // DB 제출 (경량화 및 에러 핸들링 보강)
   const handleSubmit = async () => {
     if (!validateBasicInfo()) return;
     setIsSubmitting(true);
@@ -205,10 +198,10 @@ export default function App() {
       let ownerSig = '';
 
       if (managerSigRef.current && typeof managerSigRef.current.isEmpty === 'function' && !managerSigRef.current.isEmpty()) {
-        managerSig = managerSigRef.current.getCanvas().toDataURL('image/png');
+        managerSig = managerSigRef.current.getCanvas().toDataURL('image/jpeg', 0.5); // 용량 압축
       }
       if (ownerSigRef.current && typeof ownerSigRef.current.isEmpty === 'function' && !ownerSigRef.current.isEmpty()) {
-        ownerSig = ownerSigRef.current.getCanvas().toDataURL('image/png');
+        ownerSig = ownerSigRef.current.getCanvas().toDataURL('image/jpeg', 0.5); // 용량 압축
       }
 
       const calculated = calculateScores();
@@ -230,19 +223,18 @@ export default function App() {
         language: lang
       };
 
-      const { data, error } = await supabase.from('inspections').insert([payload]).select();
+      const { error } = await supabase.from('inspections').insert([payload]);
       
       if (error) {
-        console.error('Supabase Insert Error:', error);
-        throw new Error(error.message || 'Supabase DB 저장 실패');
+        throw error;
       }
 
       alert(isEn ? '🎉 Saved to DB successfully!' : '🎉 성공적으로 Supabase DB에 저장되었습니다!');
       handleReset();
       setActiveTab('library');
     } catch (err: any) {
-      console.error('Submit Catch Error:', err);
-      alert(`⚠️ DB 저장 실패: ${err.message || 'Supabase 연결 상태를 확인해 주세요.'}`);
+      console.error('Submit Error Details:', err);
+      alert(`⚠️ DB 저장 실패: ${err.message || '네트워크 통신 오류가 발생했습니다.'}`);
     } finally {
       setIsSubmitting(false);
     }
@@ -252,7 +244,6 @@ export default function App() {
     window.print();
   };
 
-  // 그룹화 렌더링
   const renderItemGroups = (items: any[]) => {
     const categories: { [key: string]: { [key: string]: any[] } } = {};
     
