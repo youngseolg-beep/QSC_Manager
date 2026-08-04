@@ -33,7 +33,6 @@ export default function App() {
 
   const isEn = lang === 'en';
 
-  // 더미 데이터 채우기
   const fillDummyData = () => {
     setBranchName('강남 직영점(테스트)');
     setInspectorName('홍길동 매니저');
@@ -48,7 +47,6 @@ export default function App() {
     alert('⚡ 모든 항목이 [우수/준수]로 자동 채워졌습니다!');
   };
 
-  // Supabase DB에서 보관함 불러오기
   const fetchLibrary = async () => {
     setIsLoadingLibrary(true);
     try {
@@ -58,11 +56,12 @@ export default function App() {
         .order('created_at', { ascending: false });
 
       if (error) {
-        throw error;
+        console.error('Supabase fetch error:', error);
+      } else {
+        setSavedInspections(data || []);
       }
-      setSavedInspections(data || []);
     } catch (err: any) {
-      console.error('Supabase fetch error:', err);
+      console.error('Library Exception:', err);
     } finally {
       setIsLoadingLibrary(false);
     }
@@ -130,7 +129,7 @@ export default function App() {
         const selectedVal = scores[item.id];
         if (selectedVal !== undefined) {
           if (selectedVal === -1) {
-            // 비해당 제외
+            // 비해당
           } else {
             totalMax += (item.maxScore || 0);
             totalCurrent += selectedVal;
@@ -169,7 +168,7 @@ export default function App() {
     setActiveTab('hall');
   };
 
-  // 💡 [핵심 해결 로직] 사진을 400px 이하 / 화질 40%로 강제 초경량 압축 (DB 페이로드 오류 100% 방지)
+  // 사진 업로드 초경량화 (300px, 30% 화질 압축)
   const handlePhotoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!activePhotoModalItem || !e.target.files) return;
     const files = Array.from(e.target.files);
@@ -183,7 +182,7 @@ export default function App() {
         img.onload = () => {
           const canvas = document.createElement('canvas');
           const ctx = canvas.getContext('2d');
-          const maxDim = 400; // 최대 해상도를 400px로 감소
+          const maxDim = 300;
           let width = img.width;
           let height = img.height;
 
@@ -203,8 +202,7 @@ export default function App() {
           canvas.height = height;
           ctx?.drawImage(img, 0, 0, width, height);
           
-          // 화질 0.4(40%) 설정 -> 파일 용량이 수 KB 수준으로 대폭 축소됨
-          const ultraLightBase64 = canvas.toDataURL('image/jpeg', 0.4);
+          const ultraLightBase64 = canvas.toDataURL('image/jpeg', 0.3);
 
           setPhotos(prev => {
             const current = prev[activePhotoModalItem.id] || [];
@@ -219,7 +217,7 @@ export default function App() {
     });
   };
 
-  // Supabase DB 저장
+  // DB 제출 (오류 디버깅 강화)
   const handleSubmit = async () => {
     if (!validateBasicInfo()) return;
     setIsSubmitting(true);
@@ -228,12 +226,11 @@ export default function App() {
       let managerSig = '';
       let ownerSig = '';
 
-      // 서명 캔버스 이미지도 40% 압축
       if (managerSigRef.current && typeof managerSigRef.current.isEmpty === 'function' && !managerSigRef.current.isEmpty()) {
-        managerSig = managerSigRef.current.getCanvas().toDataURL('image/jpeg', 0.4);
+        managerSig = managerSigRef.current.getCanvas().toDataURL('image/jpeg', 0.3);
       }
       if (ownerSigRef.current && typeof ownerSigRef.current.isEmpty === 'function' && !ownerSigRef.current.isEmpty()) {
-        ownerSig = ownerSigRef.current.getCanvas().toDataURL('image/jpeg', 0.4);
+        ownerSig = ownerSigRef.current.getCanvas().toDataURL('image/jpeg', 0.3);
       }
 
       const calculated = calculateScores();
@@ -255,9 +252,12 @@ export default function App() {
         language: lang
       };
 
+      console.log('Sending payload to Supabase:', payload);
+
       const { data, error } = await supabase.from('inspections').insert([payload]).select();
 
       if (error) {
+        console.error('Supabase DB Insert Error Object:', error);
         throw error;
       }
 
@@ -265,8 +265,8 @@ export default function App() {
       handleReset();
       setActiveTab('library');
     } catch (err: any) {
-      console.error('Supabase Submit Error:', err);
-      alert(`⚠️ Supabase DB 저장 실패: ${err.message || '네트워크 통신 오류'}`);
+      console.error('Submit Error Catch:', err);
+      alert(`⚠️ Supabase DB 저장 실패: ${err.message || '네트워크 통신 오류가 발생했습니다.'}\n(F12 개발자 도구 콘솔의 상세 에러를 확인해 주세요)`);
     } finally {
       setIsSubmitting(false);
     }
