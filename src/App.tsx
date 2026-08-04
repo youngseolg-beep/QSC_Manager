@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { 
   Building2, User, Calendar, CheckCircle2, 
-  RotateCcw, Send, ShieldCheck, ChevronRight, Camera, X, RefreshCw, Save, Globe, FolderArchive, Printer, Eye, Zap
+  RotateCcw, Send, ShieldCheck, ChevronRight, Camera, X, RefreshCw, Globe, FolderArchive, Printer, Eye, Zap
 } from 'lucide-react';
 import SignatureCanvas from 'react-signature-canvas';
 
@@ -33,6 +33,7 @@ export default function App() {
 
   const isEn = lang === 'en';
 
+  // 테스트용 더미 데이터 자동 채우기
   const fillDummyData = () => {
     setBranchName('강남 직영점(테스트)');
     setInspectorName('홍길동 매니저');
@@ -47,34 +48,12 @@ export default function App() {
     alert('⚡ 모든 항목이 [우수/준수]로 자동 채워졌습니다!');
   };
 
-  // 보관함 불러오기 (Supabase DB + 로컬스토리지 합성)
-  const fetchLibrary = async () => {
+  // 보관함 불러오기 (로컬 우선)
+  const fetchLibrary = () => {
     setIsLoadingLibrary(true);
-    let combined: any[] = [];
-    
-    // 1. LocalStorage 데이터 가져오기
     const localData = JSON.parse(localStorage.getItem('qsc_inspections') || '[]');
-    combined = [...localData];
-
-    // 2. Supabase DB 데이터 시도
-    try {
-      const { data, error } = await supabase
-        .from('inspections')
-        .select('*')
-        .order('created_at', { ascending: false });
-
-      if (!error && data) {
-        // 중복 제거 후 합치기
-        const dbIds = new Set(data.map(d => d.id));
-        const filteredLocal = localData.filter((l: any) => !dbIds.has(l.id));
-        combined = [...data, ...filteredLocal];
-      }
-    } catch (err) {
-      console.warn('DB Fetch failed, falling back to LocalStorage:', err);
-    } finally {
-      setSavedInspections(combined);
-      setIsLoadingLibrary(false);
-    }
+    setSavedInspections(localData);
+    setIsLoadingLibrary(false);
   };
 
   useEffect(() => {
@@ -199,7 +178,7 @@ export default function App() {
     });
   };
 
-  // 100% 저장 보장 제출 함수
+  // 저장 함수
   const handleSubmit = async () => {
     if (!validateBasicInfo()) return;
     setIsSubmitting(true);
@@ -216,8 +195,8 @@ export default function App() {
       }
 
       const calculated = calculateScores();
-
       const recordId = 'insp_' + Date.now();
+
       const payload = {
         id: recordId,
         created_at: new Date().toISOString(),
@@ -237,25 +216,18 @@ export default function App() {
         language: lang
       };
 
-      // 1. 로컬스토리지 백업 저장 (무조건 성공)
+      // 1. 로컬스토리지 즉시 저장
       const existingLocal = JSON.parse(localStorage.getItem('qsc_inspections') || '[]');
       localStorage.setItem('qsc_inspections', JSON.stringify([payload, ...existingLocal]));
 
-      // 2. Supabase 전송 시도
-      let isDbSuccess = false;
+      // 2. Supabase 백그라운드 전송 시도
       try {
-        const { error } = await supabase.from('inspections').insert([payload]);
-        if (!error) isDbSuccess = true;
-      } catch (dbErr) {
-        console.warn('Supabase DB push skipped:', dbErr);
+        await supabase.from('inspections').insert([payload]);
+      } catch (e) {
+        console.warn('Supabase DB Sync Skipped');
       }
 
-      if (isDbSuccess) {
-        alert('🎉 성공적으로 DB 및 보관함에 저장되었습니다!');
-      } else {
-        alert('⚠️ 네트워크 응답 문제로 온라인 DB 전송은 건너뛰었으나,\n내 앱 보관함(Library)에 100% 안전하게 저장되었습니다!');
-      }
-
+      alert(isEn ? '🎉 Saved successfully!' : '🎉 평가 결과가 성공적으로 저장되었습니다!');
       handleReset();
       setActiveTab('library');
     } catch (err: any) {
@@ -354,6 +326,36 @@ export default function App() {
     ));
   };
 
+  // 📄 상세보기 리포트 내 전체 문항 렌더링 함수
+  const renderDetailReportItems = (details: Record<string, number>, photoData: Record<string, string[]>) => {
+    return CHECKLIST_ITEMS.map((item, idx) => {
+      const val = details ? details[item.id] : undefined;
+      const matchedOpt = item.options.find((o: any) => o.val === val);
+      const label = matchedOpt ? matchedOpt.label : (val !== undefined ? `${val}점` : '미평가');
+      const itemPhotos = photoData ? (photoData[item.id] || []) : [];
+
+      return (
+        <tr key={item.id} className="border-b border-slate-200 text-xs">
+          <td className="p-2 font-bold text-center border-r border-slate-200 text-slate-500">{idx + 1}</td>
+          <td className="p-2 border-r border-slate-200 text-slate-600 font-semibold">{item.category} &gt; {item.subCategory}</td>
+          <td className="p-2 border-r border-slate-200 font-medium text-slate-800">{item.task}</td>
+          <td className="p-2 border-r border-slate-200 text-center font-bold text-blue-600 bg-slate-50/50">{label}</td>
+          <td className="p-2 text-center">
+            {itemPhotos.length > 0 ? (
+              <div className="flex items-center justify-center gap-1">
+                {itemPhotos.map((img, photoIdx) => (
+                  <img key={photoIdx} src={img} alt="증빙" className="w-10 h-10 object-cover rounded border" />
+                ))}
+              </div>
+            ) : (
+              <span className="text-slate-300">-</span>
+            )}
+          </td>
+        </tr>
+      );
+    });
+  };
+
   return (
     <div className="min-h-screen bg-slate-50 text-slate-800 pb-28">
       {/* 상단 헤더 */}
@@ -415,6 +417,7 @@ export default function App() {
           </div>
         </div>
 
+        {/* 탭 네비게이션 */}
         <div className="max-w-7xl mx-auto px-4 flex border-t border-slate-100">
           <button
             onClick={() => setActiveTab('hall')}
@@ -451,6 +454,7 @@ export default function App() {
         </div>
       </header>
 
+      {/* 메인 콘텐츠 */}
       <main className="max-w-7xl mx-auto px-4 py-6">
         {activeTab === 'hall' && (
           <div>
@@ -585,7 +589,7 @@ export default function App() {
                         onClick={() => setSelectedInspection(item)}
                         className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-bold text-xs flex items-center gap-1"
                       >
-                        <Eye className="w-3.5 h-3.5" /> 결과지 상세보기 / PDF
+                        <Eye className="w-3.5 h-3.5" /> 상세 보고서 / PDF
                       </button>
                     </div>
                   </div>
@@ -600,7 +604,7 @@ export default function App() {
         <div className="max-w-7xl mx-auto flex items-center justify-between gap-4">
           <div className="flex items-center gap-3">
             <span className="inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 bg-emerald-50 text-emerald-600 rounded-full border border-emerald-200">
-              <span className="w-2 h-2 rounded-full bg-emerald-500"></span> DB READY
+              <span className="w-2 h-2 rounded-full bg-emerald-500"></span> READY
             </span>
             <button
               onClick={handleReset}
@@ -690,50 +694,76 @@ export default function App() {
         </div>
       )}
 
+      {/* 📄 상세보기 & PDF 인쇄 종합 리포트 모달 (전체 문항 내역 포함) */}
       {selectedInspection && (
         <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 overflow-y-auto">
-          <div className="bg-white rounded-2xl max-w-2xl w-full p-6 shadow-2xl relative my-8">
-            <div className="flex items-center justify-between pb-4 border-b border-slate-200 print:hidden">
-              <h3 className="font-bold text-slate-800 text-lg">점검 리포트 상세</h3>
+          <div className="bg-white rounded-2xl max-w-4xl w-full p-6 shadow-2xl relative my-8 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between pb-4 border-b border-slate-200 sticky top-0 bg-white z-10 print:hidden">
+              <h3 className="font-bold text-slate-800 text-lg">상세 QSC 점검 리포트</h3>
               <div className="flex items-center gap-2">
                 <button
                   onClick={handlePrintPDF}
-                  className="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold px-3 py-1.5 rounded-lg flex items-center gap-1"
+                  className="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold px-4 py-2 rounded-lg flex items-center gap-1.5 shadow"
                 >
-                  <Printer className="w-3.5 h-3.5" /> PDF 저장 / 인쇄
+                  <Printer className="w-4 h-4" /> PDF 저장 / 인쇄
                 </button>
-                <button onClick={() => setSelectedInspection(null)} className="text-slate-400 hover:text-slate-600">
+                <button onClick={() => setSelectedInspection(null)} className="text-slate-400 hover:text-slate-600 p-1">
                   <X className="w-6 h-6" />
                 </button>
               </div>
             </div>
 
+            {/* 실제 인쇄 출력 영역 */}
             <div className="py-6 space-y-6">
               <div className="text-center border-b pb-4">
-                <h2 className="text-2xl font-black text-slate-900">QSC 점검 평가 리포트</h2>
+                <h2 className="text-2xl font-black text-slate-900">QSC 점검 종합 평가 리포트</h2>
                 <p className="text-sm text-slate-500 mt-1">점검 일자: {selectedInspection.inspection_date}</p>
               </div>
 
-              <div className="grid grid-cols-2 gap-4 bg-slate-50 p-4 rounded-xl text-sm">
-                <div><span className="font-bold">지점명:</span> {selectedInspection.branch_name}</div>
-                <div><span className="font-bold">점검자:</span> {selectedInspection.inspector_name}</div>
+              <div className="grid grid-cols-2 gap-4 bg-slate-50 p-4 rounded-xl text-sm border border-slate-200">
+                <div><span className="font-bold text-slate-700">지점명:</span> {selectedInspection.branch_name}</div>
+                <div><span className="font-bold text-slate-700">점검자:</span> {selectedInspection.inspector_name}</div>
               </div>
 
               <div className="grid grid-cols-3 gap-2 text-center bg-blue-50/50 p-4 rounded-xl border border-blue-100">
                 <div>
                   <p className="text-xs font-bold text-slate-500">홀 점수</p>
-                  <p className="text-lg font-black">{selectedInspection.hall_score}점 ({selectedInspection.hall_grade})</p>
+                  <p className="text-xl font-black text-slate-800">{selectedInspection.hall_score}점 ({selectedInspection.hall_grade})</p>
                 </div>
                 <div>
                   <p className="text-xs font-bold text-slate-500">주방 점수</p>
-                  <p className="text-lg font-black">{selectedInspection.kitchen_score}점 ({selectedInspection.kitchen_grade})</p>
+                  <p className="text-xl font-black text-slate-800">{selectedInspection.kitchen_score}점 ({selectedInspection.kitchen_grade})</p>
                 </div>
                 <div>
                   <p className="text-xs font-bold text-slate-500">최종 점수</p>
-                  <p className="text-lg font-black text-blue-600">{selectedInspection.final_score}점 ({selectedInspection.final_grade})</p>
+                  <p className="text-xl font-black text-blue-600">{selectedInspection.final_score}점 ({selectedInspection.final_grade})</p>
                 </div>
               </div>
 
+              {/* 📋 전체 점검 문항 개별 내역 표 */}
+              <div className="space-y-2">
+                <h4 className="text-sm font-bold text-slate-800 flex items-center gap-1.5">
+                  <span className="w-2 h-2 rounded-full bg-blue-600"></span> 세부 점검 항목 평가 내역
+                </h4>
+                <div className="border border-slate-200 rounded-lg overflow-hidden">
+                  <table className="w-full text-left border-collapse">
+                    <thead>
+                      <tr className="bg-slate-100 text-slate-700 text-xs font-bold border-b border-slate-200">
+                        <th className="p-2 text-center w-12 border-r border-slate-200">No.</th>
+                        <th className="p-2 w-44 border-r border-slate-200">카테고리</th>
+                        <th className="p-2 border-r border-slate-200">점검 항목 내용</th>
+                        <th className="p-2 text-center w-24 border-r border-slate-200">평가 결과</th>
+                        <th className="p-2 text-center w-28">첨부 사진</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {renderDetailReportItems(selectedInspection.details, selectedInspection.evidence_photos)}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {/* ✍️ 서명 내역 */}
               <div className="grid grid-cols-2 gap-4 pt-4 border-t border-slate-200">
                 <div className="text-center">
                   <p className="text-xs font-bold text-slate-600 mb-2">점검자 서명</p>
