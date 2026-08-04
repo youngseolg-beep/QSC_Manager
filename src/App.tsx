@@ -16,13 +16,7 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<'hall' | 'kitchen' | 'final' | 'library'>('hall');
   const [branchName, setBranchName] = useState('');
   const [inspectorName, setInspectorName] = useState('');
-  
-  // ⏰ 날짜 및 시간 기본값 (현재 일시 자동 세팅)
   const [inspectionDate, setInspectionDate] = useState(new Date().toISOString().split('T')[0]);
-  const [inspectionTime, setInspectionTime] = useState(() => {
-    const now = new Date();
-    return `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
-  });
 
   // 이슈 및 요청사항 코멘트 상태
   const [managerComment, setManagerComment] = useState('');
@@ -281,8 +275,12 @@ export default function App() {
       const ownerSig = getWhiteBgSignature(ownerSigRef);
 
       const calculated = calculateScores();
-      // ⏰ 날짜 + 시간(HH:mm) 확실하게 결합
-      const fullDateTime = `${inspectionDate} ${inspectionTime}`;
+      
+      // ⏰ 저장 누르는 시점의 현재 시:분(HH:mm)을 날짜 뒤에 자동 결합
+      const now = new Date();
+      const hours = String(now.getHours()).padStart(2, '0');
+      const minutes = String(now.getMinutes()).padStart(2, '0');
+      const fullDateTime = `${inspectionDate} ${hours}:${minutes}`;
 
       const payload = {
         inspection_date: fullDateTime,
@@ -300,7 +298,7 @@ export default function App() {
         owner_comment: ownerComment,
         details: scores,
         evidence_photos: photos,
-        language: lang // 언어 설정 기록 (en이면 외국인용 영문 보고서로 렌더링)
+        language: lang
       };
 
       const { error } = await supabase.from('inspections').insert([payload]).select();
@@ -557,7 +555,6 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-800 pb-28">
-      {/* 🖨️ PDF 인쇄 잘림 방지 CSS 규격 */}
       <style>{`
         @media print {
           body { background: white !important; padding: 0 !important; margin: 0 !important; }
@@ -575,7 +572,7 @@ export default function App() {
         }
       `}</style>
 
-      {/* 한국인 전용 입력 시스템 UI 헤더 */}
+      {/* 깔끔한 헤더 (상단 시간 입력창 제거) */}
       <header className="bg-white border-b border-slate-200 sticky top-0 z-30 shadow-sm print:hidden">
         <div className="max-w-7xl mx-auto px-3.5 py-2.5 flex flex-wrap items-center justify-between gap-2.5">
           <div className="flex items-center gap-1.5">
@@ -594,7 +591,6 @@ export default function App() {
               더미 채우기
             </button>
 
-            {/* 🌐 결과 리포트 언어 설정 토글 */}
             <button
               onClick={() => setLang(l => l === 'ko' ? 'en' : 'ko')}
               className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-bold border transition-all ${
@@ -626,7 +622,6 @@ export default function App() {
               />
             </div>
             
-            {/* ⏰ 날짜 + 시간 선택창 */}
             <div className="flex items-center gap-1 bg-slate-100 px-2 py-1 rounded-lg text-xs">
               <Calendar className="w-3.5 h-3.5 text-slate-500" />
               <input
@@ -634,12 +629,6 @@ export default function App() {
                 value={inspectionDate}
                 onChange={(e) => setInspectionDate(e.target.value)}
                 className="bg-transparent border-none outline-none font-medium text-slate-600 text-xs w-24 sm:w-auto"
-              />
-              <input
-                type="time"
-                value={inspectionTime}
-                onChange={(e) => setInspectionTime(e.target.value)}
-                className="bg-transparent border-none outline-none font-bold text-blue-600 text-xs w-16"
               />
             </div>
           </div>
@@ -732,7 +721,6 @@ export default function App() {
               </div>
             </div>
 
-            {/* 코멘트 영역 */}
             <div className="bg-white p-4 rounded-xl border border-slate-200 space-y-3 shadow-sm">
               <h3 className="text-xs sm:text-sm font-bold text-slate-800 flex items-center gap-1.5 border-b pb-2">
                 <MessageSquare className="w-4 h-4 text-blue-600" />
@@ -838,7 +826,7 @@ export default function App() {
                           )}
                         </div>
                         
-                        {/* ⏰ 시:분 포함 표기 */}
+                        {/* ⏰ 시:분 포함 자동 생성 시각 표기 */}
                         <h3 className="font-bold text-slate-800 text-sm sm:text-base mt-1 flex items-center gap-1">
                           <Clock className="w-3.5 h-3.5 text-slate-400" />
                           {item.inspection_date}
@@ -983,7 +971,7 @@ export default function App() {
         </div>
       )}
 
-      {/* 🌐 언어 상태(ko/en)에 따라 전체 영문/한글 변경되는 상세 보고서 모달 */}
+      {/* 모달 상세보기 및 수정 */}
       {selectedInspection && (() => {
         const isReportEn = selectedInspection.language === 'en';
 
@@ -1145,7 +1133,6 @@ export default function App() {
                   </div>
                 </div>
 
-                {/* 이슈 및 요청사항 영문/한글 표현 대응 */}
                 <div className="space-y-1.5 pt-2">
                   <h4 className="text-xs sm:text-sm font-bold text-slate-800 flex items-center gap-1.5">
                     <span className="w-1.5 h-1.5 rounded-full bg-blue-600"></span> 
