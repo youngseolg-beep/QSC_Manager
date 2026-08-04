@@ -1,39 +1,27 @@
-export interface ScoreOption {
-  label: string;
-  labelEn?: string;
-  score: number;
-  val?: number; // 🔥 data.ts에 들어있는 'val' 속성 허용!
-  [key: string]: any; // 기타 유연한 데이터 속성 허용
-}
-
-export interface InspectionItem {
-  id: number | string; // 🔥 문자열 id(ex: "3521")도 받아들일 수 있도록 수정!
-  category: string;
-  categoryEn?: string;
-  subcategory?: string;
-  subcategoryEn?: string;
-  title: string;
-  titleEn?: string;
-  options: ScoreOption[];
-  maxScore: number;
-  [key: string]: any;
-}
-
-export interface InspectionResult {
-  id?: string;
-  created_at?: string;
-  language?: string;
-  inspection_date: string;
-  branch_name: string;
-  inspector_name: string;
-  kitchen_score: number;
-  kitchen_grade: string;
-  hall_score: number;
-  hall_grade: string;
-  final_score: number;
-  final_grade: string;
-  manager_signature?: string;
-  owner_signature?: string;
-  details: Record<string | number, number>;
-  evidence_photos?: Record<string | number, string[]>;
+{
+  "name": "qsc-manager",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "lint": "eslint .",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.39.0",
+    "lucide-react": "^0.344.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "react-signature-canvas": "^1.0.6"
+  },
+  "devDependencies": {
+    "@types/react": "^18.2.56",
+    "@types/react-dom": "^18.2.19",
+    "@types/react-signature-canvas": "^1.0.5",
+    "@vitejs/plugin-react": "^4.2.1",
+    "typescript": "^5.2.2",
+    "vite": "^5.1.4"
+  }
 }
