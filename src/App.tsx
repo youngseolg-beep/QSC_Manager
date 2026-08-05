@@ -1,12 +1,12 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { 
   Building2, User, Calendar, CheckCircle2, 
-  RotateCcw, Send, ShieldCheck, ChevronRight, Camera, X, RefreshCw, Globe, FolderArchive, Printer, Eye, Zap, Trash2, Edit3, Save, Clock, MessageSquare
+  RotateCcw, Send, ShieldCheck, ChevronRight, Camera, X, RefreshCw, Globe, FolderArchive, Printer, Eye, Zap, Trash2, Edit3, Save, Clock, MessageSquare, Loader2
 } from 'lucide-react';
 import SignatureCanvas from 'react-signature-canvas';
 
 import { CHECKLIST_ITEMS } from './data';
-import { supabase } from './utils/supabase';
+import { supabase, uploadPhotoToStorage, deletePhotosFromStorage } from './utils/supabase';
 
 const HALL_ITEMS = CHECKLIST_ITEMS.filter(item => item.category === '홀').map((item, idx) => ({ ...item, globalIndex: idx + 1 }));
 const KITCHEN_ITEMS = CHECKLIST_ITEMS.filter(item => item.category === '주방').map((item, idx) => ({ ...item, globalIndex: idx + 1 }));
@@ -18,20 +18,23 @@ export default function App() {
   const [inspectorName, setInspectorName] = useState('');
   const [inspectionDate, setInspectionDate] = useState(new Date().toISOString().split('T')[0]);
 
-  // 이슈 및 요청사항 코멘트 상태
+  // 코멘트 상태
   const [managerComment, setManagerComment] = useState('');
   const [ownerComment, setOwnerComment] = useState('');
 
   const [scores, setScores] = useState<Record<string, number>>({});
+  
+  // Storage에 업로드 완료된 사진 URL 모음
   const [photos, setPhotos] = useState<Record<string, string[]>>({});
   const [activePhotoModalItem, setActivePhotoModalItem] = useState<any | null>(null);
+  const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const [savedInspections, setSavedInspections] = useState<any[]>([]);
   const [selectedInspection, setSelectedInspection] = useState<any | null>(null);
   const [isLoadingLibrary, setIsLoadingLibrary] = useState(false);
 
-  // 수정 모드 관련 상태
+  // 수정 모드 상태
   const [isEditing, setIsEditing] = useState(false);
   const [editBranchName, setEditBranchName] = useState('');
   const [editInspectorName, setEditInspectorName] = useState('');
@@ -40,7 +43,7 @@ export default function App() {
   const [editOwnerComment, setEditOwnerComment] = useState('');
   const [editDetails, setEditDetails] = useState<Record<string, number>>({});
 
-  // 이미지 확대 라이트박스 모달 상태
+  // 라이트박스 확대 모달
   const [enlargedImage, setEnlargedImage] = useState<string | null>(null);
 
   const managerSigRef = useRef<any>(null);
@@ -62,7 +65,7 @@ export default function App() {
       }
     });
     setScores(dummyScores);
-    alert('⚡ 모든 항목 및 코멘트가 자동 채워졌습니다!');
+    alert('⚡ 모든 점수 항목 및 코멘트가 자동 채워졌습니다!');
   };
 
   const fetchLibrary = async () => {
@@ -185,59 +188,82 @@ export default function App() {
     setActiveTab('hall');
   };
 
-  const handlePhotoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (!activePhotoModalItem || !e.target.files) return;
+  // 📷 고화질 보존(1600px) + Supabase Storage 백그라운드 실시간 업로드
+  const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!activePhotoModalItem || !e.target.files || e.target.files.length === 0) return;
     const files = Array.from(e.target.files);
     
-    files.forEach((file) => {
-      const reader = new FileReader();
-      reader.readAsDataURL(file);
-      reader.onload = (event) => {
-        const img = new Image();
-        img.src = event.target?.result as string;
-        img.onload = () => {
-          const canvas = document.createElement('canvas');
-          const ctx = canvas.getContext('2d');
-          const maxDim = 800;
-          let width = img.width;
-          let height = img.height;
+    setIsUploadingPhoto(true);
 
-          if (width > height) {
-            if (width > maxDim) {
-              height *= maxDim / width;
-              width = maxDim;
-            }
-          } else {
-            if (height > maxDim) {
-              width *= maxDim / height;
-              height = maxDim;
-            }
-          }
+    try {
+      for (const file of files) {
+        // 이미 3장이 채워졌으면 중단
+        const currentPhotos = photos[activePhotoModalItem.id] || [];
+        if (currentPhotos.length >= 3) {
+          alert('사진은 항목당 최대 3장까지만 첨부할 수 있습니다.');
+          break;
+        }
 
-          canvas.width = width;
-          canvas.height = height;
-          ctx?.drawImage(img, 0, 0, width, height);
-          
-          const compressedBase64 = canvas.toDataURL('image/jpeg', 0.7);
+        // 고화질 보존 압축 (최대 1600px, Quality 0.8)
+        const compressedBase64 = await new Promise<string>((resolve) => {
+          const reader = new FileReader();
+          reader.readAsDataURL(file);
+          reader.onload = (event) => {
+            const img = new Image();
+            img.src = event.target?.result as string;
+            img.onload = () => {
+              const canvas = document.createElement('canvas');
+              const ctx = canvas.getContext('2d');
+              
+              const maxDim = 1600; // 고화질 해상도 보존
+              let width = img.width;
+              let height = img.height;
 
-          setPhotos(prev => {
-            const current = prev[activePhotoModalItem.id] || [];
-            if (current.length >= 3) {
-              alert('사진은 최대 3장까지만 첨부할 수 있습니다.');
-              return prev;
-            }
-            return { ...prev, [activePhotoModalItem.id]: [...current, compressedBase64] };
-          });
-        };
-      };
-    });
+              if (width > height) {
+                if (width > maxDim) {
+                  height = Math.round(height * (maxDim / width));
+                  width = maxDim;
+                }
+              } else {
+                if (height > maxDim) {
+                  width = Math.round(width * (maxDim / height));
+                  height = maxDim;
+                }
+              }
 
-    if (fileInputRef.current) {
-      fileInputRef.current.value = '';
+              canvas.width = width;
+              canvas.height = height;
+              ctx?.drawImage(img, 0, 0, width, height);
+              resolve(canvas.toDataURL('image/jpeg', 0.8));
+            };
+          };
+        });
+
+        // Supabase Storage 업로드 실행 및 URL 반환받기
+        const uploadedUrl = await uploadPhotoToStorage(compressedBase64, activePhotoModalItem.id);
+
+        setPhotos(prev => {
+          const current = prev[activePhotoModalItem.id] || [];
+          return { ...prev, [activePhotoModalItem.id]: [...current, uploadedUrl] };
+        });
+      }
+    } catch (err: any) {
+      alert(`⚠️ 사진 업로드 중 오류가 발생했습니다: ${err.message}`);
+    } finally {
+      setIsUploadingPhoto(false);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
     }
   };
 
-  const handleDeletePhoto = (itemId: string, photoIdx: number) => {
+  const handleDeletePhoto = async (itemId: string, photoIdx: number) => {
+    const targetUrl = photos[itemId]?.[photoIdx];
+    if (targetUrl) {
+      // Storage에서 파일 삭제
+      deletePhotosFromStorage([targetUrl]);
+    }
+
     setPhotos(prev => {
       const current = prev[itemId] || [];
       const updated = current.filter((_, idx) => idx !== photoIdx);
@@ -250,10 +276,12 @@ export default function App() {
     });
   };
 
+  // ✍️ 서명 캔버스 이미지 생성
   const getWhiteBgSignature = (sigRef: any) => {
     if (!sigRef.current || sigRef.current.isEmpty()) return '';
     const canvas = sigRef.current.getCanvas();
     const tempCanvas = document.createElement('canvas');
+    
     tempCanvas.width = canvas.width;
     tempCanvas.height = canvas.height;
     const ctx = tempCanvas.getContext('2d');
@@ -263,18 +291,15 @@ export default function App() {
       ctx.fillRect(0, 0, tempCanvas.width, tempCanvas.height);
       ctx.drawImage(canvas, 0, 0);
     }
-    return tempCanvas.toDataURL('image/png');
+    return tempCanvas.toDataURL('image/jpeg', 0.7);
   };
 
-  // ⏰ 날짜 + 시:분 확실하게 파싱하는 헬퍼 함수
   const formatDateTimeDisplay = (item: any) => {
     const rawDate = item.inspection_date || '';
-    // 이미 시간에 관한 정보(공백 포함)가 들어있는 경우 그대로 반환
     if (rawDate.includes(' ') && rawDate.includes(':')) {
       return rawDate;
     }
     
-    // 만약 날짜만 입력된 경우, DB 생성시간(created_at)에서 시:분을 추출하여 결합
     if (item.created_at) {
       const dateObj = new Date(item.created_at);
       const hours = String(dateObj.getHours()).padStart(2, '0');
@@ -288,6 +313,7 @@ export default function App() {
     return `${rawDate} ${hours}:${minutes}`;
   };
 
+  // ⚡ Storage URL 기반 초고속 DB 제출
   const handleSubmit = async () => {
     if (!validateBasicInfo()) return;
     setIsSubmitting(true);
@@ -298,14 +324,14 @@ export default function App() {
 
       const calculated = calculateScores();
       
-      // ⏰ 저장 버튼 누른 현재 시:분 강제 결합
       const now = new Date();
       const hours = String(now.getHours()).padStart(2, '0');
       const minutes = String(now.getMinutes()).padStart(2, '0');
       const fullDateTime = `${inspectionDate} ${hours}:${minutes}`;
 
+      // DB에는 거대한 이미지 대신 Storage URL 배열만 전송하므로 10KB 미만의 가벼운 데이터
       const payload = {
-        inspection_date: fullDateTime, // 저장할 때 날짜+시간 통째로 전달
+        inspection_date: fullDateTime,
         branch_name: branchName,
         inspector_name: inspectorName,
         kitchen_score: calculated.kitchenScore,
@@ -319,7 +345,7 @@ export default function App() {
         manager_comment: managerComment,
         owner_comment: ownerComment,
         details: scores,
-        evidence_photos: photos,
+        evidence_photos: photos, // URL 배열 저장
         language: lang
       };
 
@@ -340,15 +366,28 @@ export default function App() {
     }
   };
 
-  const handleDeleteInspection = async (id: string, branch: string, date: string) => {
-    if (!window.confirm(`정말 [${branch} (${date})] 리포트를 삭제하시겠습니까?`)) return;
+  // 삭제 시 DB 레코드 및 Storage 사진 파일 동시 삭제
+  const handleDeleteInspection = async (item: any) => {
+    if (!window.confirm(`정말 [${item.branch_name} (${item.inspection_date})] 리포트를 삭제하시겠습니까?`)) return;
 
     try {
-      const { error } = await supabase.from('inspections').delete().eq('id', id);
+      // 1. Storage 사진 파일 일괄 삭제
+      if (item.evidence_photos) {
+        const allPhotoUrls: string[] = [];
+        Object.values(item.evidence_photos).forEach((arr: any) => {
+          if (Array.isArray(arr)) {
+            allPhotoUrls.push(...arr);
+          }
+        });
+        await deletePhotosFromStorage(allPhotoUrls);
+      }
+
+      // 2. DB 레코드 삭제
+      const { error } = await supabase.from('inspections').delete().eq('id', item.id);
       if (error) throw error;
 
       alert('🗑️ 성공적으로 삭제되었습니다.');
-      if (selectedInspection?.id === id) {
+      if (selectedInspection?.id === item.id) {
         setSelectedInspection(null);
       }
       fetchLibrary();
@@ -457,6 +496,7 @@ export default function App() {
                                 key={pIdx} 
                                 src={img} 
                                 alt="첨부" 
+                                loading="lazy"
                                 onClick={() => setEnlargedImage(img)}
                                 className="w-6 h-6 object-cover rounded cursor-pointer hover:opacity-80 border border-slate-300"
                               />
@@ -553,6 +593,7 @@ export default function App() {
             )}
           </td>
 
+          {/* 지연 로딩 적용된 고화질 이미지 렌더링 */}
           <td className="p-1.5 sm:p-2 text-center min-w-[60px]">
             {itemPhotos.length > 0 ? (
               <div className="flex items-center justify-center gap-1 flex-wrap">
@@ -561,6 +602,7 @@ export default function App() {
                     key={photoIdx} 
                     src={img} 
                     alt="증빙" 
+                    loading="lazy"
                     onClick={() => setEnlargedImage(img)}
                     className="w-8 h-8 sm:w-10 sm:h-10 object-cover rounded border cursor-pointer hover:scale-105 transition-transform" 
                   />
@@ -801,7 +843,7 @@ export default function App() {
               className="w-full py-3.5 sm:py-4 rounded-xl font-bold text-white bg-blue-600 hover:bg-blue-700 shadow-lg flex items-center justify-center gap-2 disabled:bg-slate-400 text-sm sm:text-base"
             >
               {isSubmitting 
-                ? '데이터 저장 중...' 
+                ? <><Loader2 className="w-4 h-4 animate-spin" /> DB 저장 중...</> 
                 : <><Send className="w-4 h-4 sm:w-5 sm:h-5" /> DB 저장 및 최종 평가 완료</>
               }
             </button>
@@ -847,7 +889,6 @@ export default function App() {
                           )}
                         </div>
                         
-                        {/* ⏰ 핵심 수정: 기존데이터 및 신규데이터 모두 시:분(HH:mm) 확실하게 파싱해서 표시 */}
                         <h3 className="font-bold text-slate-800 text-sm sm:text-base mt-1 flex items-center gap-1">
                           <Clock className="w-3.5 h-3.5 text-slate-400" />
                           {formatDateTimeDisplay(item)}
@@ -877,7 +918,7 @@ export default function App() {
                           <Eye className="w-3 h-3" /> 상세 보고서 / PDF
                         </button>
                         <button
-                          onClick={() => handleDeleteInspection(item.id, item.branch_name, item.inspection_date)}
+                          onClick={() => handleDeleteInspection(item)}
                           className="p-1.5 bg-red-50 text-red-600 hover:bg-red-100 rounded-lg text-xs transition-all"
                           title="삭제"
                         >
@@ -952,7 +993,7 @@ export default function App() {
               <div className="grid grid-cols-3 gap-2 mb-3">
                 {(photos[activePhotoModalItem.id] || []).map((img, idx) => (
                   <div key={idx} className="relative aspect-square rounded-lg overflow-hidden border border-slate-200">
-                    <img src={img} alt="증빙" className="w-full h-full object-cover" />
+                    <img src={img} alt="증빙" className="w-full h-full object-cover" loading="lazy" />
                     
                     <button
                       onClick={() => handleDeletePhoto(activePhotoModalItem.id, idx)}
@@ -971,14 +1012,20 @@ export default function App() {
                 accept="image/*"
                 multiple
                 onChange={handlePhotoUpload}
+                disabled={isUploadingPhoto}
                 className="hidden"
               />
 
               <button
                 onClick={() => fileInputRef.current?.click()}
-                className="w-full py-2.5 border-2 border-dashed border-slate-200 rounded-xl text-xs font-bold text-slate-600 flex items-center justify-center gap-1.5 hover:border-blue-500 hover:text-blue-600 transition-all"
+                disabled={isUploadingPhoto}
+                className="w-full py-2.5 border-2 border-dashed border-slate-200 rounded-xl text-xs font-bold text-slate-600 flex items-center justify-center gap-1.5 hover:border-blue-500 hover:text-blue-600 transition-all disabled:bg-slate-100"
               >
-                <Camera className="w-4 h-4" /> 사진 촬영 / 앨범 선택
+                {isUploadingPhoto ? (
+                  <><Loader2 className="w-4 h-4 animate-spin text-blue-600" /> 고화질 업로드 중...</>
+                ) : (
+                  <><Camera className="w-4 h-4" /> 사진 촬영 / 앨범 선택</>
+                )}
               </button>
             </div>
 
@@ -1026,7 +1073,7 @@ export default function App() {
                         <span>{isReportEn ? 'PDF' : 'PDF / 인쇄'}</span>
                       </button>
                       <button
-                        onClick={() => handleDeleteInspection(selectedInspection.id, selectedInspection.branch_name, selectedInspection.inspection_date)}
+                        onClick={() => handleDeleteInspection(selectedInspection)}
                         className="bg-red-50 text-red-600 hover:bg-red-100 text-[11px] sm:text-xs font-bold px-2 py-1.5 rounded-lg flex items-center gap-1"
                       >
                         <Trash2 className="w-3 h-3" />
@@ -1224,13 +1271,13 @@ export default function App() {
         );
       })()}
 
-      {/* 사진 크게 보기 팝업 */}
+      {/* 사진 확대 모달 */}
       {enlargedImage && (
         <div 
           onClick={() => setEnlargedImage(null)}
           className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-3 cursor-pointer print:hidden"
         >
-          <div className="relative max-w-3xl w-full max-h-[90vh] flex items-center justify-center">
+          <div className="relative max-w-4xl w-full max-h-[90vh] flex items-center justify-center">
             <img src={enlargedImage} alt="확대보기" className="max-w-full max-h-[85vh] rounded-lg shadow-2xl object-contain bg-white" />
             <button 
               onClick={() => setEnlargedImage(null)}
