@@ -1,7 +1,12 @@
 import { createClient } from '@supabase/supabase-js';
 
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://fdbxikqwzingtzcptfsh.supabase.co/rest/v1/';
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZkYnhpa3F3emluZ3R6Y3B0ZnNoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODU4MDk1MzgsImV4cCI6MjEwMTM4NTUzOH0.9BwBhuVVI84IwIE_mKooQ22VgVtu6Js-e4p9BAM08LU';
+// 기본 입력값
+const rawUrl = import.meta.env.VITE_SUPABASE_URL || 'https://fdbxikqwzingtzcptfsh.supabase.co/rest/v1/';
+const rawAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZkYnhpa3F3emluZ3R6Y3B0ZnNoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODU4MDk1MzgsImV4cCI6MjEwMTM4NTUzOH0.9BwBhuVVI84IwIE_mKooQ22VgVtu6Js-e4p9BAM08LU';
+
+// 💡 URL 끝의 /rest/v1/ 이나 / 슬래시를 완벽히 제거하여 순수 도메인만 정제 (https://fdbxikqwzingtzcptfsh.supabase.co)
+const supabaseUrl = rawUrl.replace(/\/rest\/v1\/?$/, '').replace(/\/+$/, '');
+const supabaseAnonKey = rawAnonKey.trim();
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
@@ -14,7 +19,6 @@ export const uploadPhotoToStorage = async (file: File | string, itemId: string):
     let fileExt = 'jpg';
 
     if (typeof file === 'string') {
-      // Base64 문자열인 경우 Blob 변환
       const res = await fetch(file);
       fileBlob = await res.blob();
     } else {
@@ -22,32 +26,32 @@ export const uploadPhotoToStorage = async (file: File | string, itemId: string):
       fileExt = file.name.split('.').pop() || 'jpg';
     }
 
-    // 파일 고유 파일명 생성 (예: h_s_1_1722700000000_random.jpg)
-    const fileName = `${itemId}_${Date.now()}_${Math.random().toString(36).substring(2, 7)}.${fileExt}`;
-    const filePath = `photos/${fileName}`;
+    // 파일명 인코딩 에러 방지를 위한 정제
+    const cleanItemId = String(itemId).replace(/[^a-zA-Z0-9]/g, '_');
+    const fileName = `${cleanItemId}_${Date.now()}_${Math.random().toString(36).substring(2, 7)}.${fileExt}`;
 
-    // Storage 업로드
+    // Storage 업로드 (inspection-photos 버킷 루트에 바로 저장)
     const { data, error } = await supabase.storage
       .from('inspection-photos')
-      .upload(filePath, fileBlob, {
+      .upload(fileName, fileBlob, {
         contentType: fileBlob.type || 'image/jpeg',
         upsert: true
       });
 
     if (error) {
-      console.error('Storage upload error:', error);
+      console.error('Storage upload error details:', error);
       throw error;
     }
 
-    // 업로드된 파일의 Public URL 받아오기
+    // Public URL 추출
     const { data: publicUrlData } = supabase.storage
       .from('inspection-photos')
-      .getPublicUrl(filePath);
+      .getPublicUrl(fileName);
 
     return publicUrlData.publicUrl;
   } catch (err: any) {
     console.error('uploadPhotoToStorage Catch:', err);
-    throw new Error(`사진 업로드 실패: ${err.message || '네트워크 오류'}`);
+    throw new Error(err.message || '네트워크 통신 오류');
   }
 };
 
