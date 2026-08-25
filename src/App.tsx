@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { 
   Building2, User, Calendar, CheckCircle2, 
-  RotateCcw, Send, ShieldCheck, ChevronRight, Camera, X, RefreshCw, Globe, FolderArchive, Printer, Eye, Zap, Trash2, Edit3, Save, Clock, MessageSquare, Loader2
+  RotateCcw, Send, ShieldCheck, ChevronRight, Camera, X, RefreshCw, Globe, FolderArchive, Printer, Eye, Zap, Trash2, Edit3, Save, Clock, MessageSquare, Loader2, Filter, ArrowUpDown, Plus
 } from 'lucide-react';
 import SignatureCanvas from 'react-signature-canvas';
 
@@ -11,12 +11,39 @@ import { supabase, uploadPhotoToStorage, deletePhotosFromStorage } from './utils
 const HALL_ITEMS = CHECKLIST_ITEMS.filter(item => item.category === '홀').map((item, idx) => ({ ...item, globalIndex: idx + 1 }));
 const KITCHEN_ITEMS = CHECKLIST_ITEMS.filter(item => item.category === '주방').map((item, idx) => ({ ...item, globalIndex: idx + 1 }));
 
+// 기본 제공 예시 목록
+const DEFAULT_COUNTRIES = ['한국 (Korea)', '미국 (USA)', '일본 (Japan)', '베트남 (Vietnam)', '중국 (China)'];
+const DEFAULT_BRANCHES = ['강남 직영점', '홍대점', '성수점', 'LA 1호점', '도쿄 시부야점'];
+const DEFAULT_INSPECTORS = ['홍길동 매니저', '김철수 팀장', '이영희 슈퍼바이저'];
+
 export default function App() {
   const [lang, setLang] = useState<'ko' | 'en'>('ko');
   const [activeTab, setActiveTab] = useState<'hall' | 'kitchen' | 'final' | 'library'>('hall');
+  
+  // 국가, 지점, 점검자 상태
+  const [country, setCountry] = useState('한국 (Korea)');
   const [branchName, setBranchName] = useState('');
   const [inspectorName, setInspectorName] = useState('');
   const [inspectionDate, setInspectionDate] = useState(new Date().toISOString().split('T')[0]);
+
+  // 커스텀 옵션 목록 상태 (사용자가 직접 추가한 데이터 누적)
+  const [countryOptions, setCountryOptions] = useState<string[]>(() => {
+    const saved = localStorage.getItem('qsc_country_options');
+    return saved ? JSON.parse(saved) : DEFAULT_COUNTRIES;
+  });
+  const [branchOptions, setBranchOptions] = useState<string[]>(() => {
+    const saved = localStorage.getItem('qsc_branch_options');
+    return saved ? JSON.parse(saved) : DEFAULT_BRANCHES;
+  });
+  const [inspectorOptions, setInspectorOptions] = useState<string[]>(() => {
+    const saved = localStorage.getItem('qsc_inspector_options');
+    return saved ? JSON.parse(saved) : DEFAULT_INSPECTORS;
+  });
+
+  // 신규 직접 입력 모드 토글
+  const [isCustomCountry, setIsCustomCountry] = useState(false);
+  const [isCustomBranch, setIsCustomBranch] = useState(false);
+  const [isCustomInspector, setIsCustomInspector] = useState(false);
 
   // 코멘트 상태
   const [managerComment, setManagerComment] = useState('');
@@ -34,8 +61,15 @@ export default function App() {
   const [selectedInspection, setSelectedInspection] = useState<any | null>(null);
   const [isLoadingLibrary, setIsLoadingLibrary] = useState(false);
 
+  // 보관함 필터 및 정렬 상태
+  const [filterCountry, setFilterCountry] = useState<string>('ALL');
+  const [filterBranch, setFilterBranch] = useState<string>('ALL');
+  const [filterInspector, setFilterInspector] = useState<string>('ALL');
+  const [sortBy, setSortBy] = useState<'latest' | 'oldest' | 'scoreHigh' | 'scoreLow' | 'country' | 'branch'>('latest');
+
   // 수정 모드 상태
   const [isEditing, setIsEditing] = useState(false);
+  const [editCountry, setEditCountry] = useState('');
   const [editBranchName, setEditBranchName] = useState('');
   const [editInspectorName, setEditInspectorName] = useState('');
   const [editInspectionDate, setEditInspectionDate] = useState('');
@@ -52,7 +86,28 @@ export default function App() {
 
   const isItemListEn = lang === 'en';
 
+  // 새 옵션 추가 시 localStorage에 저장
+  const addOptionIfNew = (type: 'country' | 'branch' | 'inspector', val: string) => {
+    const trimmed = val.trim();
+    if (!trimmed) return;
+
+    if (type === 'country' && !countryOptions.includes(trimmed)) {
+      const next = [...countryOptions, trimmed];
+      setCountryOptions(next);
+      localStorage.setItem('qsc_country_options', JSON.stringify(next));
+    } else if (type === 'branch' && !branchOptions.includes(trimmed)) {
+      const next = [...branchOptions, trimmed];
+      setBranchOptions(next);
+      localStorage.setItem('qsc_branch_options', JSON.stringify(next));
+    } else if (type === 'inspector' && !inspectorOptions.includes(trimmed)) {
+      const next = [...inspectorOptions, trimmed];
+      setInspectorOptions(next);
+      localStorage.setItem('qsc_inspector_options', JSON.stringify(next));
+    }
+  };
+
   const fillDummyData = () => {
+    setCountry('한국 (Korea)');
     setBranchName('강남 직영점(테스트)');
     setInspectorName('홍길동 매니저');
     setManagerComment(isItemListEn ? 'Need to replace hall fixtures.' : '홀 집기류 교체 검토 바람.');
@@ -80,7 +135,15 @@ export default function App() {
         console.error('Supabase fetch error:', error);
         alert(`⚠️ 데이터 불러오기 실패: ${error.message}`);
       } else {
-        setSavedInspections(data || []);
+        const fetchedData = data || [];
+        setSavedInspections(fetchedData);
+
+        // DB에 있는 기존 국가/지점/점검자 데이터를 드롭다운 옵션에 자동 등록
+        fetchedData.forEach(item => {
+          if (item.country) addOptionIfNew('country', item.country);
+          if (item.branch_name) addOptionIfNew('branch', item.branch_name);
+          if (item.inspector_name) addOptionIfNew('inspector', item.inspector_name);
+        });
       }
     } catch (err: any) {
       console.error('Library Exception:', err);
@@ -104,12 +167,16 @@ export default function App() {
   const isKitchenComplete = KITCHEN_ITEMS.length > 0 && KITCHEN_ITEMS.every(item => scores[item.id] !== undefined);
 
   const validateBasicInfo = () => {
+    if (!country.trim()) {
+      alert('⚠️ 국가를 입력 또는 선택해 주세요.');
+      return false;
+    }
     if (!branchName.trim()) {
-      alert('⚠️ 지점명을 입력해 주세요.');
+      alert('⚠️ 지점명을 입력 또는 선택해 주세요.');
       return false;
     }
     if (!inspectorName.trim()) {
-      alert('⚠️ 점검자 이름을 입력해 주세요.');
+      alert('⚠️ 점검자 이름을 입력 또는 선택해 주세요.');
       return false;
     }
     return true;
@@ -188,7 +255,7 @@ export default function App() {
     setActiveTab('hall');
   };
 
-  // 📷 고화질 보존(1600px) + Supabase Storage 백그라운드 실시간 업로드
+  // 📷 사진 업로드
   const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!activePhotoModalItem || !e.target.files || e.target.files.length === 0) return;
     const files = Array.from(e.target.files);
@@ -197,14 +264,12 @@ export default function App() {
 
     try {
       for (const file of files) {
-        // 이미 3장이 채워졌으면 중단
         const currentPhotos = photos[activePhotoModalItem.id] || [];
         if (currentPhotos.length >= 3) {
           alert('사진은 항목당 최대 3장까지만 첨부할 수 있습니다.');
           break;
         }
 
-        // 고화질 보존 압축 (최대 1600px, Quality 0.8)
         const compressedBase64 = await new Promise<string>((resolve) => {
           const reader = new FileReader();
           reader.readAsDataURL(file);
@@ -215,7 +280,7 @@ export default function App() {
               const canvas = document.createElement('canvas');
               const ctx = canvas.getContext('2d');
               
-              const maxDim = 1600; // 고화질 해상도 보존
+              const maxDim = 1600;
               let width = img.width;
               let height = img.height;
 
@@ -239,7 +304,6 @@ export default function App() {
           };
         });
 
-        // Supabase Storage 업로드 실행 및 URL 반환받기
         const uploadedUrl = await uploadPhotoToStorage(compressedBase64, activePhotoModalItem.id);
 
         setPhotos(prev => {
@@ -260,7 +324,6 @@ export default function App() {
   const handleDeletePhoto = async (itemId: string, photoIdx: number) => {
     const targetUrl = photos[itemId]?.[photoIdx];
     if (targetUrl) {
-      // Storage에서 파일 삭제
       deletePhotosFromStorage([targetUrl]);
     }
 
@@ -276,7 +339,6 @@ export default function App() {
     });
   };
 
-  // ✍️ 서명 캔버스 이미지 생성
   const getWhiteBgSignature = (sigRef: any) => {
     if (!sigRef.current || sigRef.current.isEmpty()) return '';
     const canvas = sigRef.current.getCanvas();
@@ -313,12 +375,17 @@ export default function App() {
     return `${rawDate} ${hours}:${minutes}`;
   };
 
-  // ⚡ Storage URL 기반 초고속 DB 제출
+  // DB 제출
   const handleSubmit = async () => {
     if (!validateBasicInfo()) return;
     setIsSubmitting(true);
 
     try {
+      // 신규 입력 옵션 보관함에 등록
+      addOptionIfNew('country', country);
+      addOptionIfNew('branch', branchName);
+      addOptionIfNew('inspector', inspectorName);
+
       const managerSig = getWhiteBgSignature(managerSigRef);
       const ownerSig = getWhiteBgSignature(ownerSigRef);
 
@@ -329,9 +396,9 @@ export default function App() {
       const minutes = String(now.getMinutes()).padStart(2, '0');
       const fullDateTime = `${inspectionDate} ${hours}:${minutes}`;
 
-      // DB에는 거대한 이미지 대신 Storage URL 배열만 전송하므로 10KB 미만의 가벼운 데이터
       const payload = {
         inspection_date: fullDateTime,
+        country: country,
         branch_name: branchName,
         inspector_name: inspectorName,
         kitchen_score: calculated.kitchenScore,
@@ -345,15 +412,13 @@ export default function App() {
         manager_comment: managerComment,
         owner_comment: ownerComment,
         details: scores,
-        evidence_photos: photos, // URL 배열 저장
+        evidence_photos: photos,
         language: lang
       };
 
       const { error } = await supabase.from('inspections').insert([payload]).select();
 
-      if (error) {
-        throw error;
-      }
+      if (error) throw error;
 
       alert('🎉 성공적으로 Supabase DB에 저장되었습니다!');
       handleReset();
@@ -366,12 +431,10 @@ export default function App() {
     }
   };
 
-  // 삭제 시 DB 레코드 및 Storage 사진 파일 동시 삭제
   const handleDeleteInspection = async (item: any) => {
     if (!window.confirm(`정말 [${item.branch_name} (${item.inspection_date})] 리포트를 삭제하시겠습니까?`)) return;
 
     try {
-      // 1. Storage 사진 파일 일괄 삭제
       if (item.evidence_photos) {
         const allPhotoUrls: string[] = [];
         Object.values(item.evidence_photos).forEach((arr: any) => {
@@ -382,7 +445,6 @@ export default function App() {
         await deletePhotosFromStorage(allPhotoUrls);
       }
 
-      // 2. DB 레코드 삭제
       const { error } = await supabase.from('inspections').delete().eq('id', item.id);
       if (error) throw error;
 
@@ -398,6 +460,7 @@ export default function App() {
 
   const startEditing = (item: any) => {
     setIsEditing(true);
+    setEditCountry(item.country || '한국 (Korea)');
     setEditBranchName(item.branch_name || '');
     setEditInspectorName(item.inspector_name || '');
     setEditInspectionDate(formatDateTimeDisplay(item));
@@ -413,6 +476,7 @@ export default function App() {
       const calculated = calculateScores(editDetails);
 
       const updatePayload = {
+        country: editCountry,
         branch_name: editBranchName,
         inspector_name: editInspectorName,
         inspection_date: editInspectionDate,
@@ -447,6 +511,45 @@ export default function App() {
 
   const handlePrintPDF = () => {
     window.print();
+  };
+
+  // 보관함 필터링 및 정렬 로직
+  const getFilteredAndSortedInspections = () => {
+    let result = [...savedInspections];
+
+    if (filterCountry !== 'ALL') {
+      result = result.filter(item => (item.country || '한국 (Korea)') === filterCountry);
+    }
+    if (filterBranch !== 'ALL') {
+      result = result.filter(item => item.branch_name === filterBranch);
+    }
+    if (filterInspector !== 'ALL') {
+      result = result.filter(item => item.inspector_name === filterInspector);
+    }
+
+    result.sort((a, b) => {
+      if (sortBy === 'latest') {
+        return new Date(b.created_at || b.inspection_date).getTime() - new Date(a.created_at || a.inspection_date).getTime();
+      }
+      if (sortBy === 'oldest') {
+        return new Date(a.created_at || a.inspection_date).getTime() - new Date(b.created_at || b.inspection_date).getTime();
+      }
+      if (sortBy === 'scoreHigh') {
+        return (b.final_score || 0) - (a.final_score || 0);
+      }
+      if (sortBy === 'scoreLow') {
+        return (a.final_score || 0) - (b.final_score || 0);
+      }
+      if (sortBy === 'country') {
+        return (a.country || '').localeCompare(b.country || '');
+      }
+      if (sortBy === 'branch') {
+        return (a.branch_name || '').localeCompare(b.branch_name || '');
+      }
+      return 0;
+    });
+
+    return result;
   };
 
   const renderItemGroups = (items: any[]) => {
@@ -593,7 +696,6 @@ export default function App() {
             )}
           </td>
 
-          {/* 지연 로딩 적용된 고화질 이미지 렌더링 */}
           <td className="p-1.5 sm:p-2 text-center min-w-[60px]">
             {itemPhotos.length > 0 ? (
               <div className="flex items-center justify-center gap-1 flex-wrap">
@@ -616,6 +718,8 @@ export default function App() {
       );
     });
   };
+
+  const filteredInspections = getFilteredAndSortedInspections();
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-800 pb-28">
@@ -664,28 +768,123 @@ export default function App() {
               {isItemListEn ? '보고서 언어: English' : '보고서 언어: 한국어'}
             </button>
 
-            <div className="flex items-center gap-1 bg-slate-100 px-2 py-1 rounded-lg text-xs">
-              <Building2 className="w-3.5 h-3.5 text-slate-500" />
-              <input
-                type="text"
-                placeholder="지점명"
-                value={branchName}
-                onChange={(e) => setBranchName(e.target.value)}
-                className="bg-transparent border-none outline-none w-20 sm:w-28 font-medium placeholder:text-slate-400 text-xs"
-              />
+            {/* 🌐 1. 국가 입력/선택 드롭다운 */}
+            <div className="flex items-center gap-1 bg-slate-100 px-2 py-1 rounded-lg text-xs border border-slate-200">
+              <Globe className="w-3.5 h-3.5 text-blue-600" />
+              {isCustomCountry ? (
+                <div className="flex items-center gap-1">
+                  <input
+                    type="text"
+                    placeholder="국가 직접 입력"
+                    value={country}
+                    onChange={(e) => setCountry(e.target.value)}
+                    className="bg-white px-1.5 py-0.5 border rounded outline-none w-24 sm:w-28 font-medium text-xs text-slate-800"
+                    autoFocus
+                  />
+                  <button onClick={() => setIsCustomCountry(false)} className="text-[10px] bg-slate-200 px-1 rounded hover:bg-slate-300 font-bold">선택</button>
+                </div>
+              ) : (
+                <div className="flex items-center gap-1">
+                  <select
+                    value={country}
+                    onChange={(e) => {
+                      if (e.target.value === 'ADD_NEW') {
+                        setIsCustomCountry(true);
+                        setCountry('');
+                      } else {
+                        setCountry(e.target.value);
+                      }
+                    }}
+                    className="bg-transparent border-none outline-none font-medium text-slate-700 text-xs cursor-pointer max-w-[100px] sm:max-w-[130px]"
+                  >
+                    {countryOptions.map(c => (
+                      <option key={c} value={c}>{c}</option>
+                    ))}
+                    <option value="ADD_NEW">+ 직접 입력 추가</option>
+                  </select>
+                </div>
+              )}
             </div>
-            <div className="flex items-center gap-1 bg-slate-100 px-2 py-1 rounded-lg text-xs">
-              <User className="w-3.5 h-3.5 text-slate-500" />
-              <input
-                type="text"
-                placeholder="점검자"
-                value={inspectorName}
-                onChange={(e) => setInspectorName(e.target.value)}
-                className="bg-transparent border-none outline-none w-16 sm:w-24 font-medium placeholder:text-slate-400 text-xs"
-              />
+
+            {/* 🏢 2. 지점명 입력/선택 드롭다운 */}
+            <div className="flex items-center gap-1 bg-slate-100 px-2 py-1 rounded-lg text-xs border border-slate-200">
+              <Building2 className="w-3.5 h-3.5 text-blue-600" />
+              {isCustomBranch ? (
+                <div className="flex items-center gap-1">
+                  <input
+                    type="text"
+                    placeholder="지점명 직접 입력"
+                    value={branchName}
+                    onChange={(e) => setBranchName(e.target.value)}
+                    className="bg-white px-1.5 py-0.5 border rounded outline-none w-24 sm:w-28 font-medium text-xs text-slate-800"
+                    autoFocus
+                  />
+                  <button onClick={() => setIsCustomBranch(false)} className="text-[10px] bg-slate-200 px-1 rounded hover:bg-slate-300 font-bold">선택</button>
+                </div>
+              ) : (
+                <div className="flex items-center gap-1">
+                  <select
+                    value={branchName}
+                    onChange={(e) => {
+                      if (e.target.value === 'ADD_NEW') {
+                        setIsCustomBranch(true);
+                        setBranchName('');
+                      } else {
+                        setBranchName(e.target.value);
+                      }
+                    }}
+                    className="bg-transparent border-none outline-none font-medium text-slate-700 text-xs cursor-pointer max-w-[100px] sm:max-w-[130px]"
+                  >
+                    <option value="">-- 지점 선택 --</option>
+                    {branchOptions.map(b => (
+                      <option key={b} value={b}>{b}</option>
+                    ))}
+                    <option value="ADD_NEW">+ 직접 입력 추가</option>
+                  </select>
+                </div>
+              )}
+            </div>
+
+            {/* 👤 3. 점검자 입력/선택 드롭다운 */}
+            <div className="flex items-center gap-1 bg-slate-100 px-2 py-1 rounded-lg text-xs border border-slate-200">
+              <User className="w-3.5 h-3.5 text-blue-600" />
+              {isCustomInspector ? (
+                <div className="flex items-center gap-1">
+                  <input
+                    type="text"
+                    placeholder="점검자 직접 입력"
+                    value={inspectorName}
+                    onChange={(e) => setInspectorName(e.target.value)}
+                    className="bg-white px-1.5 py-0.5 border rounded outline-none w-20 sm:w-24 font-medium text-xs text-slate-800"
+                    autoFocus
+                  />
+                  <button onClick={() => setIsCustomInspector(false)} className="text-[10px] bg-slate-200 px-1 rounded hover:bg-slate-300 font-bold">선택</button>
+                </div>
+              ) : (
+                <div className="flex items-center gap-1">
+                  <select
+                    value={inspectorName}
+                    onChange={(e) => {
+                      if (e.target.value === 'ADD_NEW') {
+                        setIsCustomInspector(true);
+                        setInspectorName('');
+                      } else {
+                        setInspectorName(e.target.value);
+                      }
+                    }}
+                    className="bg-transparent border-none outline-none font-medium text-slate-700 text-xs cursor-pointer max-w-[90px] sm:max-w-[120px]"
+                  >
+                    <option value="">-- 점검자 선택 --</option>
+                    {inspectorOptions.map(i => (
+                      <option key={i} value={i}>{i}</option>
+                    ))}
+                    <option value="ADD_NEW">+ 직접 입력 추가</option>
+                  </select>
+                </div>
+              )}
             </div>
             
-            <div className="flex items-center gap-1 bg-slate-100 px-2 py-1 rounded-lg text-xs">
+            <div className="flex items-center gap-1 bg-slate-100 px-2 py-1 rounded-lg text-xs border border-slate-200">
               <Calendar className="w-3.5 h-3.5 text-slate-500" />
               <input
                 type="date"
@@ -850,46 +1049,123 @@ export default function App() {
           </div>
         )}
 
-        {/* 보관함(Library) 탭 */}
+        {/* 📂 보관함(Library) 탭 - 필터 및 정렬 제공 */}
         {activeTab === 'library' && (
-          <div className="max-w-5xl mx-auto space-y-3.5">
-            <div className="flex items-center justify-between">
-              <h2 className="text-base sm:text-lg font-bold text-slate-800 flex items-center gap-1.5">
-                <FolderArchive className="w-4 h-4 sm:w-5 sm:h-5 text-indigo-600" />
-                평가 결과 보관함
-              </h2>
+          <div className="max-w-5xl mx-auto space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white p-3.5 sm:p-4 rounded-2xl border border-slate-200 shadow-sm">
+              <div className="flex items-center gap-2">
+                <FolderArchive className="w-5 h-5 text-indigo-600" />
+                <h2 className="text-base sm:text-lg font-bold text-slate-800">평가 결과 보관함</h2>
+                <span className="text-xs bg-indigo-50 text-indigo-700 font-bold px-2 py-0.5 rounded-full border border-indigo-100">
+                  총 {filteredInspections.length}건
+                </span>
+              </div>
+
               <button
                 onClick={fetchLibrary}
-                className="text-[11px] sm:text-xs bg-white border border-slate-200 px-2.5 py-1 rounded-lg text-slate-600 hover:bg-slate-50 flex items-center gap-1"
+                className="text-xs bg-slate-100 border border-slate-200 px-3 py-1.5 rounded-lg text-slate-600 hover:bg-slate-200 flex items-center gap-1 self-end sm:self-auto font-bold"
               >
-                <RefreshCw className="w-3 h-3" /> 새로고침
+                <RefreshCw className="w-3.5 h-3.5" /> 새로고침
               </button>
+            </div>
+
+            {/* 🔍 국가, 지점, 점검자 필터 & 정렬바 */}
+            <div className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-sm flex flex-wrap items-center justify-between gap-2.5 text-xs">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="font-bold text-slate-500 flex items-center gap-1">
+                  <Filter className="w-3.5 h-3.5 text-indigo-600" /> 필터:
+                </span>
+
+                {/* 국가 필터 */}
+                <select
+                  value={filterCountry}
+                  onChange={(e) => setFilterCountry(e.target.value)}
+                  className="bg-slate-50 border border-slate-200 rounded-lg px-2 py-1 font-bold text-slate-700 outline-none"
+                >
+                  <option value="ALL">🌐 전체 국가</option>
+                  {countryOptions.map(c => <option key={c} value={c}>{c}</option>)}
+                </select>
+
+                {/* 지점 필터 */}
+                <select
+                  value={filterBranch}
+                  onChange={(e) => setFilterBranch(e.target.value)}
+                  className="bg-slate-50 border border-slate-200 rounded-lg px-2 py-1 font-bold text-slate-700 outline-none"
+                >
+                  <option value="ALL">🏢 전체 지점</option>
+                  {branchOptions.map(b => <option key={b} value={b}>{b}</option>)}
+                </select>
+
+                {/* 점검자 필터 */}
+                <select
+                  value={filterInspector}
+                  onChange={(e) => setFilterInspector(e.target.value)}
+                  className="bg-slate-50 border border-slate-200 rounded-lg px-2 py-1 font-bold text-slate-700 outline-none"
+                >
+                  <option value="ALL">👤 전체 점검자</option>
+                  {inspectorOptions.map(i => <option key={i} value={i}>{i}</option>)}
+                </select>
+
+                {(filterCountry !== 'ALL' || filterBranch !== 'ALL' || filterInspector !== 'ALL') && (
+                  <button
+                    onClick={() => {
+                      setFilterCountry('ALL');
+                      setFilterBranch('ALL');
+                      setFilterInspector('ALL');
+                    }}
+                    className="text-[11px] text-red-500 hover:underline font-bold"
+                  >
+                    필터 초기화
+                  </button>
+                )}
+              </div>
+
+              {/* 정렬 드롭다운 */}
+              <div className="flex items-center gap-1.5 ml-auto">
+                <ArrowUpDown className="w-3.5 h-3.5 text-slate-400" />
+                <select
+                  value={sortBy}
+                  onChange={(e: any) => setSortBy(e.target.value)}
+                  className="bg-slate-100 border border-slate-200 rounded-lg px-2 py-1 font-bold text-slate-700 outline-none cursor-pointer"
+                >
+                  <option value="latest">최신순</option>
+                  <option value="oldest">과거순</option>
+                  <option value="scoreHigh">점수 높은순</option>
+                  <option value="scoreLow">점수 낮은순</option>
+                  <option value="country">국가명순</option>
+                  <option value="branch">지점명순</option>
+                </select>
+              </div>
             </div>
 
             {isLoadingLibrary ? (
               <div className="p-12 text-center text-slate-500 text-xs sm:text-sm">Supabase DB에서 목록을 불러오는 중입니다...</div>
-            ) : savedInspections.length === 0 ? (
+            ) : filteredInspections.length === 0 ? (
               <div className="p-12 bg-white rounded-2xl border border-slate-200 text-center text-slate-400 text-xs sm:text-sm">
-                저장된 점검 결과가 없습니다.
+                조건에 맞는 점검 결과가 없습니다.
               </div>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-4">
-                {savedInspections.map((item) => (
+                {filteredInspections.map((item) => (
                   <div key={item.id} className="bg-white p-4 sm:p-5 rounded-2xl border border-slate-200 shadow-sm hover:shadow-md transition-all relative">
                     <div className="flex items-start justify-between border-b border-slate-100 pb-2.5 mb-2.5">
                       <div>
-                        <div className="flex items-center gap-1.5">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span className="text-[10px] sm:text-xs font-bold px-2 py-0.5 bg-indigo-50 text-indigo-600 rounded border border-indigo-100 flex items-center gap-1">
+                            <Globe className="w-3 h-3" />
+                            {item.country || '한국 (Korea)'}
+                          </span>
                           <span className="text-[10px] sm:text-xs font-bold px-2 py-0.5 bg-blue-50 text-blue-600 rounded">
                             {item.branch_name || '지점 미지정'}
                           </span>
                           {item.language === 'en' && (
-                            <span className="text-[10px] font-bold px-1.5 py-0.5 bg-indigo-100 text-indigo-700 rounded">
-                              EN Report
+                            <span className="text-[10px] font-bold px-1.5 py-0.5 bg-purple-100 text-purple-700 rounded">
+                              EN
                             </span>
                           )}
                         </div>
                         
-                        <h3 className="font-bold text-slate-800 text-sm sm:text-base mt-1 flex items-center gap-1">
+                        <h3 className="font-bold text-slate-800 text-sm sm:text-base mt-1.5 flex items-center gap-1">
                           <Clock className="w-3.5 h-3.5 text-slate-400" />
                           {formatDateTimeDisplay(item)}
                         </h3>
@@ -1127,7 +1403,21 @@ export default function App() {
                   )}
                 </div>
 
-                <div className="grid grid-cols-2 gap-2 sm:gap-4 bg-slate-50 p-2.5 sm:p-4 rounded-xl text-xs sm:text-sm border border-slate-200">
+                <div className="grid grid-cols-3 gap-2 sm:gap-4 bg-slate-50 p-2.5 sm:p-4 rounded-xl text-xs sm:text-sm border border-slate-200">
+                  <div>
+                    <span className="font-bold text-slate-700 mr-1">{isReportEn ? 'Country:' : '국가:'}</span> 
+                    {isEditing ? (
+                      <input
+                        type="text"
+                        value={editCountry}
+                        onChange={(e) => setEditCountry(e.target.value)}
+                        className="bg-white border rounded px-1.5 py-0.5 text-xs font-bold text-slate-800 w-full mt-0.5"
+                      />
+                    ) : (
+                      selectedInspection.country || '한국 (Korea)'
+                    )}
+                  </div>
+
                   <div>
                     <span className="font-bold text-slate-700 mr-1">{isReportEn ? 'Branch:' : '지점명:'}</span> 
                     {isEditing ? (
@@ -1135,12 +1425,13 @@ export default function App() {
                         type="text"
                         value={editBranchName}
                         onChange={(e) => setEditBranchName(e.target.value)}
-                        className="bg-white border rounded px-1.5 py-0.5 text-xs font-bold text-slate-800 w-28 sm:w-44"
+                        className="bg-white border rounded px-1.5 py-0.5 text-xs font-bold text-slate-800 w-full mt-0.5"
                       />
                     ) : (
                       selectedInspection.branch_name
                     )}
                   </div>
+
                   <div>
                     <span className="font-bold text-slate-700 mr-1">{isReportEn ? 'Inspector:' : '점검자:'}</span> 
                     {isEditing ? (
@@ -1148,7 +1439,7 @@ export default function App() {
                         type="text"
                         value={editInspectorName}
                         onChange={(e) => setEditInspectorName(e.target.value)}
-                        className="bg-white border rounded px-1.5 py-0.5 text-xs font-bold text-slate-800 w-24 sm:w-36"
+                        className="bg-white border rounded px-1.5 py-0.5 text-xs font-bold text-slate-800 w-full mt-0.5"
                       />
                     ) : (
                       selectedInspection.inspector_name
