@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { 
   Building2, User, Calendar, CheckCircle2, 
-  RotateCcw, Send, ShieldCheck, ChevronRight, Camera, X, RefreshCw, Globe, FolderArchive, Printer, Eye, Zap, Trash2, Edit3, Save, Clock, MessageSquare, Loader2, Filter, ArrowUpDown, Plus
+  RotateCcw, Send, ShieldCheck, ChevronRight, Camera, X, RefreshCw, Globe, FolderArchive, Printer, Eye, Zap, Trash2, Edit3, Save, Clock, MessageSquare, Loader2, Filter, ArrowUpDown, Settings, Plus
 } from 'lucide-react';
 import SignatureCanvas from 'react-signature-canvas';
 
@@ -11,39 +11,38 @@ import { supabase, uploadPhotoToStorage, deletePhotosFromStorage } from './utils
 const HALL_ITEMS = CHECKLIST_ITEMS.filter(item => item.category === '홀').map((item, idx) => ({ ...item, globalIndex: idx + 1 }));
 const KITCHEN_ITEMS = CHECKLIST_ITEMS.filter(item => item.category === '주방').map((item, idx) => ({ ...item, globalIndex: idx + 1 }));
 
-// 기본 제공 예시 목록
-const DEFAULT_COUNTRIES = ['한국 (Korea)', '미국 (USA)', '일본 (Japan)', '베트남 (Vietnam)', '중국 (China)'];
-const DEFAULT_BRANCHES = ['강남 직영점', '홍대점', '성수점', 'LA 1호점', '도쿄 시부야점'];
-const DEFAULT_INSPECTORS = ['홍길동 매니저', '김철수 팀장', '이영희 슈퍼바이저'];
-
 export default function App() {
   const [lang, setLang] = useState<'ko' | 'en'>('ko');
   const [activeTab, setActiveTab] = useState<'hall' | 'kitchen' | 'final' | 'library'>('hall');
   
-  // 국가, 지점, 점검자 상태
+  // 선택된 국가, 지점, 점검자
   const [country, setCountry] = useState('한국 (Korea)');
   const [branchName, setBranchName] = useState('');
   const [inspectorName, setInspectorName] = useState('');
   const [inspectionDate, setInspectionDate] = useState(new Date().toISOString().split('T')[0]);
 
-  // 커스텀 옵션 목록 상태 (사용자가 직접 추가한 데이터 누적)
+  // 커스텀 옵션 목록 (디폴트 예시 전부 제거, 로컬스토리지 및 DB 기반)
   const [countryOptions, setCountryOptions] = useState<string[]>(() => {
     const saved = localStorage.getItem('qsc_country_options');
-    return saved ? JSON.parse(saved) : DEFAULT_COUNTRIES;
+    return saved ? JSON.parse(saved) : ['한국 (Korea)'];
   });
   const [branchOptions, setBranchOptions] = useState<string[]>(() => {
     const saved = localStorage.getItem('qsc_branch_options');
-    return saved ? JSON.parse(saved) : DEFAULT_BRANCHES;
+    return saved ? JSON.parse(saved) : [];
   });
   const [inspectorOptions, setInspectorOptions] = useState<string[]>(() => {
     const saved = localStorage.getItem('qsc_inspector_options');
-    return saved ? JSON.parse(saved) : DEFAULT_INSPECTORS;
+    return saved ? JSON.parse(saved) : [];
   });
 
-  // 신규 직접 입력 모드 토글
+  // 직접 입력 추가 모드
   const [isCustomCountry, setIsCustomCountry] = useState(false);
   const [isCustomBranch, setIsCustomBranch] = useState(false);
   const [isCustomInspector, setIsCustomInspector] = useState(false);
+
+  // 항목 삭제/관리 모달 상태
+  const [manageModalType, setManageModalType] = useState<'country' | 'branch' | 'inspector' | null>(null);
+  const [newItemInput, setNewItemInput] = useState('');
 
   // 코멘트 상태
   const [managerComment, setManagerComment] = useState('');
@@ -86,30 +85,69 @@ export default function App() {
 
   const isItemListEn = lang === 'en';
 
-  // 새 옵션 추가 시 localStorage에 저장
+  // 새 옵션 추가
   const addOptionIfNew = (type: 'country' | 'branch' | 'inspector', val: string) => {
     const trimmed = val.trim();
     if (!trimmed) return;
 
-    if (type === 'country' && !countryOptions.includes(trimmed)) {
-      const next = [...countryOptions, trimmed];
+    if (type === 'country') {
+      setCountryOptions(prev => {
+        if (!prev.includes(trimmed)) {
+          const next = [...prev, trimmed];
+          localStorage.setItem('qsc_country_options', JSON.stringify(next));
+          return next;
+        }
+        return prev;
+      });
+    } else if (type === 'branch') {
+      setBranchOptions(prev => {
+        if (!prev.includes(trimmed)) {
+          const next = [...prev, trimmed];
+          localStorage.setItem('qsc_branch_options', JSON.stringify(next));
+          return next;
+        }
+        return prev;
+      });
+    } else if (type === 'inspector') {
+      setInspectorOptions(prev => {
+        if (!prev.includes(trimmed)) {
+          const next = [...prev, trimmed];
+          localStorage.setItem('qsc_inspector_options', JSON.stringify(next));
+          return next;
+        }
+        return prev;
+      });
+    }
+  };
+
+  // 항목 삭제
+  const handleDeleteOption = (type: 'country' | 'branch' | 'inspector', targetVal: string) => {
+    if (type === 'country') {
+      const next = countryOptions.filter(item => item !== targetVal);
       setCountryOptions(next);
       localStorage.setItem('qsc_country_options', JSON.stringify(next));
-    } else if (type === 'branch' && !branchOptions.includes(trimmed)) {
-      const next = [...branchOptions, trimmed];
+      if (country === targetVal) setCountry(next[0] || '');
+    } else if (type === 'branch') {
+      const next = branchOptions.filter(item => item !== targetVal);
       setBranchOptions(next);
       localStorage.setItem('qsc_branch_options', JSON.stringify(next));
-    } else if (type === 'inspector' && !inspectorOptions.includes(trimmed)) {
-      const next = [...inspectorOptions, trimmed];
+      if (branchName === targetVal) setBranchName('');
+    } else if (type === 'inspector') {
+      const next = inspectorOptions.filter(item => item !== targetVal);
       setInspectorOptions(next);
       localStorage.setItem('qsc_inspector_options', JSON.stringify(next));
+      if (inspectorName === targetVal) setInspectorName('');
     }
   };
 
   const fillDummyData = () => {
     setCountry('한국 (Korea)');
-    setBranchName('강남 직영점(테스트)');
+    setBranchName('강남 직영점');
     setInspectorName('홍길동 매니저');
+    addOptionIfNew('country', '한국 (Korea)');
+    addOptionIfNew('branch', '강남 직영점');
+    addOptionIfNew('inspector', '홍길동 매니저');
+
     setManagerComment(isItemListEn ? 'Need to replace hall fixtures.' : '홀 집기류 교체 검토 바람.');
     setOwnerComment(isItemListEn ? 'Please check kitchen fridge noise.' : '주방 냉장고 소음 점검 부탁드립니다.');
     
@@ -138,7 +176,7 @@ export default function App() {
         const fetchedData = data || [];
         setSavedInspections(fetchedData);
 
-        // DB에 있는 기존 국가/지점/점검자 데이터를 드롭다운 옵션에 자동 등록
+        // DB에 존재하는 항목들 드롭다운 옵션에 자동 수집
         fetchedData.forEach(item => {
           if (item.country) addOptionIfNew('country', item.country);
           if (item.branch_name) addOptionIfNew('branch', item.branch_name);
@@ -154,10 +192,8 @@ export default function App() {
   };
 
   useEffect(() => {
-    if (activeTab === 'library') {
-      fetchLibrary();
-    }
-  }, [activeTab]);
+    fetchLibrary();
+  }, []);
 
   const getUncheckedItems = (items: any[]) => {
     return items.filter(item => scores[item.id] === undefined);
@@ -381,7 +417,6 @@ export default function App() {
     setIsSubmitting(true);
 
     try {
-      // 신규 입력 옵션 보관함에 등록
       addOptionIfNew('country', country);
       addOptionIfNew('branch', branchName);
       addOptionIfNew('inspector', inspectorName);
@@ -423,6 +458,7 @@ export default function App() {
       alert('🎉 성공적으로 Supabase DB에 저장되었습니다!');
       handleReset();
       setActiveTab('library');
+      fetchLibrary();
     } catch (err: any) {
       console.error('Submit Error Catch:', err);
       alert(`⚠️ Supabase DB 저장 실패: ${err.message || '네트워크 통신 오류가 발생했습니다.'}`);
@@ -513,7 +549,7 @@ export default function App() {
     window.print();
   };
 
-  // 보관함 필터링 및 정렬 로직
+  // 보관함 필터링 및 정렬
   const getFilteredAndSortedInspections = () => {
     let result = [...savedInspections];
 
@@ -768,7 +804,7 @@ export default function App() {
               {isItemListEn ? '보고서 언어: English' : '보고서 언어: 한국어'}
             </button>
 
-            {/* 🌐 1. 국가 입력/선택 드롭다운 */}
+            {/* 🌐 1. 국가 선택/직접입력 드롭다운 */}
             <div className="flex items-center gap-1 bg-slate-100 px-2 py-1 rounded-lg text-xs border border-slate-200">
               <Globe className="w-3.5 h-3.5 text-blue-600" />
               {isCustomCountry ? (
@@ -781,7 +817,15 @@ export default function App() {
                     className="bg-white px-1.5 py-0.5 border rounded outline-none w-24 sm:w-28 font-medium text-xs text-slate-800"
                     autoFocus
                   />
-                  <button onClick={() => setIsCustomCountry(false)} className="text-[10px] bg-slate-200 px-1 rounded hover:bg-slate-300 font-bold">선택</button>
+                  <button 
+                    onClick={() => {
+                      if (country.trim()) addOptionIfNew('country', country);
+                      setIsCustomCountry(false);
+                    }} 
+                    className="text-[10px] bg-blue-600 text-white px-1.5 py-0.5 rounded font-bold"
+                  >
+                    확인
+                  </button>
                 </div>
               ) : (
                 <div className="flex items-center gap-1">
@@ -791,6 +835,8 @@ export default function App() {
                       if (e.target.value === 'ADD_NEW') {
                         setIsCustomCountry(true);
                         setCountry('');
+                      } else if (e.target.value === 'MANAGE') {
+                        setManageModalType('country');
                       } else {
                         setCountry(e.target.value);
                       }
@@ -801,12 +847,13 @@ export default function App() {
                       <option key={c} value={c}>{c}</option>
                     ))}
                     <option value="ADD_NEW">+ 직접 입력 추가</option>
+                    <option value="MANAGE">⚙️ 목록 추가/삭제 관리</option>
                   </select>
                 </div>
               )}
             </div>
 
-            {/* 🏢 2. 지점명 입력/선택 드롭다운 */}
+            {/* 🏢 2. 지점명 선택/직접입력 드롭다운 */}
             <div className="flex items-center gap-1 bg-slate-100 px-2 py-1 rounded-lg text-xs border border-slate-200">
               <Building2 className="w-3.5 h-3.5 text-blue-600" />
               {isCustomBranch ? (
@@ -819,7 +866,15 @@ export default function App() {
                     className="bg-white px-1.5 py-0.5 border rounded outline-none w-24 sm:w-28 font-medium text-xs text-slate-800"
                     autoFocus
                   />
-                  <button onClick={() => setIsCustomBranch(false)} className="text-[10px] bg-slate-200 px-1 rounded hover:bg-slate-300 font-bold">선택</button>
+                  <button 
+                    onClick={() => {
+                      if (branchName.trim()) addOptionIfNew('branch', branchName);
+                      setIsCustomBranch(false);
+                    }} 
+                    className="text-[10px] bg-blue-600 text-white px-1.5 py-0.5 rounded font-bold"
+                  >
+                    확인
+                  </button>
                 </div>
               ) : (
                 <div className="flex items-center gap-1">
@@ -829,6 +884,8 @@ export default function App() {
                       if (e.target.value === 'ADD_NEW') {
                         setIsCustomBranch(true);
                         setBranchName('');
+                      } else if (e.target.value === 'MANAGE') {
+                        setManageModalType('branch');
                       } else {
                         setBranchName(e.target.value);
                       }
@@ -840,12 +897,13 @@ export default function App() {
                       <option key={b} value={b}>{b}</option>
                     ))}
                     <option value="ADD_NEW">+ 직접 입력 추가</option>
+                    <option value="MANAGE">⚙️ 목록 추가/삭제 관리</option>
                   </select>
                 </div>
               )}
             </div>
 
-            {/* 👤 3. 점검자 입력/선택 드롭다운 */}
+            {/* 👤 3. 점검자 선택/직접입력 드롭다운 */}
             <div className="flex items-center gap-1 bg-slate-100 px-2 py-1 rounded-lg text-xs border border-slate-200">
               <User className="w-3.5 h-3.5 text-blue-600" />
               {isCustomInspector ? (
@@ -858,7 +916,15 @@ export default function App() {
                     className="bg-white px-1.5 py-0.5 border rounded outline-none w-20 sm:w-24 font-medium text-xs text-slate-800"
                     autoFocus
                   />
-                  <button onClick={() => setIsCustomInspector(false)} className="text-[10px] bg-slate-200 px-1 rounded hover:bg-slate-300 font-bold">선택</button>
+                  <button 
+                    onClick={() => {
+                      if (inspectorName.trim()) addOptionIfNew('inspector', inspectorName);
+                      setIsCustomInspector(false);
+                    }} 
+                    className="text-[10px] bg-blue-600 text-white px-1.5 py-0.5 rounded font-bold"
+                  >
+                    확인
+                  </button>
                 </div>
               ) : (
                 <div className="flex items-center gap-1">
@@ -868,6 +934,8 @@ export default function App() {
                       if (e.target.value === 'ADD_NEW') {
                         setIsCustomInspector(true);
                         setInspectorName('');
+                      } else if (e.target.value === 'MANAGE') {
+                        setManageModalType('inspector');
                       } else {
                         setInspectorName(e.target.value);
                       }
@@ -879,6 +947,7 @@ export default function App() {
                       <option key={i} value={i}>{i}</option>
                     ))}
                     <option value="ADD_NEW">+ 직접 입력 추가</option>
+                    <option value="MANAGE">⚙️ 목록 추가/삭제 관리</option>
                   </select>
                 </div>
               )}
@@ -1142,7 +1211,7 @@ export default function App() {
               <div className="p-12 text-center text-slate-500 text-xs sm:text-sm">Supabase DB에서 목록을 불러오는 중입니다...</div>
             ) : filteredInspections.length === 0 ? (
               <div className="p-12 bg-white rounded-2xl border border-slate-200 text-center text-slate-400 text-xs sm:text-sm">
-                조건에 맞는 점검 결과가 없습니다.
+                저장된 점검 결과가 없습니다.
               </div>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-4">
@@ -1251,6 +1320,76 @@ export default function App() {
           </div>
         </div>
       </footer>
+
+      {/* ⚙️ 국가 / 지점 / 점검자 항목 삭제/추가 관리 모달 */}
+      {manageModalType && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-3 print:hidden">
+          <div className="bg-white rounded-2xl p-4 sm:p-5 max-w-md w-full shadow-2xl">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+              <h3 className="font-bold text-slate-800 text-sm sm:text-base flex items-center gap-1.5">
+                <Settings className="w-4 h-4 text-blue-600" />
+                {manageModalType === 'country' && '국가 목록 관리'}
+                {manageModalType === 'branch' && '지점 목록 관리'}
+                {manageModalType === 'inspector' && '점검자 목록 관리'}
+              </h3>
+              <button onClick={() => setManageModalType(null)} className="text-slate-400 hover:text-slate-600">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="py-4 space-y-3">
+              {/* 새 항목 직접 추가 */}
+              <div className="flex items-center gap-1.5">
+                <input
+                  type="text"
+                  placeholder="새 항목 이름 입력"
+                  value={newItemInput}
+                  onChange={(e) => setNewItemInput(e.target.value)}
+                  className="flex-1 p-2 text-xs border border-slate-300 rounded-lg outline-none focus:border-blue-500 font-medium"
+                />
+                <button
+                  onClick={() => {
+                    if (newItemInput.trim()) {
+                      addOptionIfNew(manageModalType, newItemInput);
+                      setNewItemInput('');
+                    }
+                  }}
+                  className="bg-blue-600 text-white font-bold text-xs px-3 py-2 rounded-lg hover:bg-blue-700 flex items-center gap-1"
+                >
+                  <Plus className="w-3.5 h-3.5" /> 추가
+                </button>
+              </div>
+
+              {/* 기존 항목 삭제 리스트 */}
+              <div className="max-h-56 overflow-y-auto space-y-1.5 border border-slate-200 rounded-lg p-2 bg-slate-50">
+                {((manageModalType === 'country' ? countryOptions : manageModalType === 'branch' ? branchOptions : inspectorOptions)).length === 0 ? (
+                  <p className="text-center text-slate-400 text-xs py-4">등록된 항목이 없습니다.</p>
+                ) : (
+                  (manageModalType === 'country' ? countryOptions : manageModalType === 'branch' ? branchOptions : inspectorOptions).map((opt) => (
+                    <div key={opt} className="flex items-center justify-between bg-white px-3 py-2 rounded border border-slate-200 text-xs">
+                      <span className="font-medium text-slate-700">{opt}</span>
+                      <button
+                        onClick={() => handleDeleteOption(manageModalType, opt)}
+                        className="text-red-500 hover:text-red-700 p-1 rounded hover:bg-red-50"
+                        title="삭제"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+
+            <button
+              onClick={() => setManageModalType(null)}
+              className="w-full py-2.5 bg-slate-800 text-white font-bold rounded-xl text-xs"
+            >
+              닫기
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* 사진 첨부 모달 */}
       {activePhotoModalItem && (
