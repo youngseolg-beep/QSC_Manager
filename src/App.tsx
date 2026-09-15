@@ -6,7 +6,8 @@ import {
 import SignatureCanvas from 'react-signature-canvas';
 
 import { CHECKLIST_ITEMS } from './data';
-import { supabase, uploadPhotoToStorage, deletePhotosFromStorage } from './utils/supabase';
+import { HARDCODED_INSPECTIONS } from './data/inspectionRecords';
+import { deleteInspection, getInspections, saveInspection, updateInspection } from './utils/localDb';
 
 const HALL_ITEMS = CHECKLIST_ITEMS.filter(item => item.category === '홀').map((item, idx) => ({ ...item, globalIndex: idx + 1 }));
 const KITCHEN_ITEMS = CHECKLIST_ITEMS.filter(item => item.category === '주방').map((item, idx) => ({ ...item, globalIndex: idx + 1 }));
@@ -21,7 +22,7 @@ export default function App() {
   const [inspectorName, setInspectorName] = useState('');
   const [inspectionDate, setInspectionDate] = useState(new Date().toISOString().split('T')[0]);
 
-  // 커스텀 옵션 목록 (디폴트 예시 전부 제거, 로컬스토리지 및 DB 기반)
+  // 커스텀 옵션 목록 (브라우저 로컬 저장 기반)
   const [countryOptions, setCountryOptions] = useState<string[]>(() => {
     const saved = localStorage.getItem('qsc_country_options');
     return saved ? JSON.parse(saved) : ['한국 (Korea)'];
@@ -50,7 +51,7 @@ export default function App() {
 
   const [scores, setScores] = useState<Record<string, number>>({});
   
-  // Storage에 업로드 완료된 사진 URL 모음
+  // 브라우저에 임시 보관되는 압축 사진(Base64) 모음
   const [photos, setPhotos] = useState<Record<string, string[]>>({});
   const [activePhotoModalItem, setActivePhotoModalItem] = useState<any | null>(null);
   const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
@@ -164,28 +165,18 @@ export default function App() {
   const fetchLibrary = async () => {
     setIsLoadingLibrary(true);
     try {
-      const { data, error } = await supabase
-        .from('inspections')
-        .select('*')
-        .order('created_at', { ascending: false });
+      const fetchedData = await getInspections(HARDCODED_INSPECTIONS);
+      setSavedInspections(fetchedData);
 
-      if (error) {
-        console.error('Supabase fetch error:', error);
-        alert(`⚠️ 데이터 불러오기 실패: ${error.message}`);
-      } else {
-        const fetchedData = data || [];
-        setSavedInspections(fetchedData);
-
-        // DB에 존재하는 항목들 드롭다운 옵션에 자동 수집
-        fetchedData.forEach(item => {
-          if (item.country) addOptionIfNew('country', item.country);
-          if (item.branch_name) addOptionIfNew('branch', item.branch_name);
-          if (item.inspector_name) addOptionIfNew('inspector', item.inspector_name);
-        });
-      }
+      // 로컬 보관함에 존재하는 항목들을 드롭다운 옵션에 자동 수집
+      fetchedData.forEach(item => {
+        if (item.country) addOptionIfNew('country', item.country);
+        if (item.branch_name) addOptionIfNew('branch', item.branch_name);
+        if (item.inspector_name) addOptionIfNew('inspector', item.inspector_name);
+      });
     } catch (err: any) {
-      console.error('Library Exception:', err);
-      alert(`⚠️ 네트워크 통신 오류가 발생했습니다.`);
+      console.error('Local Library Exception:', err);
+      alert(`⚠️ 로컬 보관함을 불러오지 못했습니다: ${err.message || '브라우저 저장소 오류'}`);
     } finally {
       setIsLoadingLibrary(false);
     }
@@ -340,11 +331,9 @@ export default function App() {
           };
         });
 
-        const uploadedUrl = await uploadPhotoToStorage(compressedBase64, activePhotoModalItem.id);
-
         setPhotos(prev => {
           const current = prev[activePhotoModalItem.id] || [];
-          return { ...prev, [activePhotoModalItem.id]: [...current, uploadedUrl] };
+          return { ...prev, [activePhotoModalItem.id]: [...current, compressedBase64] };
         });
       }
     } catch (err: any) {
@@ -358,11 +347,6 @@ export default function App() {
   };
 
   const handleDeletePhoto = async (itemId: string, photoIdx: number) => {
-    const targetUrl = photos[itemId]?.[photoIdx];
-    if (targetUrl) {
-      deletePhotosFromStorage([targetUrl]);
-    }
-
     setPhotos(prev => {
       const current = prev[itemId] || [];
       const updated = current.filter((_, idx) => idx !== photoIdx);
@@ -411,7 +395,7 @@ export default function App() {
     return `${rawDate} ${hours}:${minutes}`;
   };
 
-  // DB 제출
+  // 브라우저 로컬 저장
   const handleSubmit = async () => {
     if (!validateBasicInfo()) return;
     setIsSubmitting(true);
@@ -451,17 +435,15 @@ export default function App() {
         language: lang
       };
 
-      const { error } = await supabase.from('inspections').insert([payload]).select();
+      await saveInspection(payload);
 
-      if (error) throw error;
-
-      alert('🎉 성공적으로 Supabase DB에 저장되었습니다!');
+      alert('🎉 이 브라우저의 로컬 보관함에 저장되었습니다!');
       handleReset();
       setActiveTab('library');
       fetchLibrary();
     } catch (err: any) {
       console.error('Submit Error Catch:', err);
-      alert(`⚠️ Supabase DB 저장 실패: ${err.message || '네트워크 통신 오류가 발생했습니다.'}`);
+      alert(`⚠️ 로컬 저장 실패: ${err.message || '브라우저 저장소 오류가 발생했습니다.'}`);
     } finally {
       setIsSubmitting(false);
     }
@@ -471,20 +453,9 @@ export default function App() {
     if (!window.confirm(`정말 [${item.branch_name} (${item.inspection_date})] 리포트를 삭제하시겠습니까?`)) return;
 
     try {
-      if (item.evidence_photos) {
-        const allPhotoUrls: string[] = [];
-        Object.values(item.evidence_photos).forEach((arr: any) => {
-          if (Array.isArray(arr)) {
-            allPhotoUrls.push(...arr);
-          }
-        });
-        await deletePhotosFromStorage(allPhotoUrls);
-      }
+      await deleteInspection(item.id);
 
-      const { error } = await supabase.from('inspections').delete().eq('id', item.id);
-      if (error) throw error;
-
-      alert('🗑️ 성공적으로 삭제되었습니다.');
+      alert('🗑️ 로컬 보관함에서 삭제되었습니다.');
       if (selectedInspection?.id === item.id) {
         setSelectedInspection(null);
       }
@@ -527,14 +498,9 @@ export default function App() {
         final_grade: calculated.finalGrade,
       };
 
-      const { error } = await supabase
-        .from('inspections')
-        .update(updatePayload)
-        .eq('id', selectedInspection.id);
+      await updateInspection(selectedInspection.id, updatePayload);
 
-      if (error) throw error;
-
-      alert('💾 성공적으로 수정되었습니다!');
+      alert('💾 로컬 보관함에 수정사항이 저장되었습니다!');
       
       const updatedItem = { ...selectedInspection, ...updatePayload };
       setSelectedInspection(updatedItem);
@@ -1111,8 +1077,8 @@ export default function App() {
               className="w-full py-3.5 sm:py-4 rounded-xl font-bold text-white bg-blue-600 hover:bg-blue-700 shadow-lg flex items-center justify-center gap-2 disabled:bg-slate-400 text-sm sm:text-base"
             >
               {isSubmitting 
-                ? <><Loader2 className="w-4 h-4 animate-spin" /> DB 저장 중...</> 
-                : <><Send className="w-4 h-4 sm:w-5 sm:h-5" /> DB 저장 및 최종 평가 완료</>
+                ? <><Loader2 className="w-4 h-4 animate-spin" /> 로컬 저장 중...</> 
+                : <><Send className="w-4 h-4 sm:w-5 sm:h-5" /> 저장 및 최종 평가 완료</>
               }
             </button>
           </div>
@@ -1208,7 +1174,7 @@ export default function App() {
             </div>
 
             {isLoadingLibrary ? (
-              <div className="p-12 text-center text-slate-500 text-xs sm:text-sm">Supabase DB에서 목록을 불러오는 중입니다...</div>
+              <div className="p-12 text-center text-slate-500 text-xs sm:text-sm">로컬 보관함에서 목록을 불러오는 중입니다...</div>
             ) : filteredInspections.length === 0 ? (
               <div className="p-12 bg-white rounded-2xl border border-slate-200 text-center text-slate-400 text-xs sm:text-sm">
                 저장된 점검 결과가 없습니다.
