@@ -141,26 +141,43 @@ export default function App() {
     }
   };
 
-  const fillDummyData = () => {
-    setCountry('한국 (Korea)');
-    setBranchName('강남 직영점');
-    setInspectorName('홍길동 매니저');
-    addOptionIfNew('country', '한국 (Korea)');
-    addOptionIfNew('branch', '강남 직영점');
-    addOptionIfNew('inspector', '홍길동 매니저');
+  const fillDemoData = () => {
+  setCountry('한국 (Korea)');
+  setBranchName('강남 데모점');
+  setInspectorName('김민지 매니저');
 
-    setManagerComment(isItemListEn ? 'Need to replace hall fixtures.' : '홀 집기류 교체 검토 바람.');
-    setOwnerComment(isItemListEn ? 'Please check kitchen fridge noise.' : '주방 냉장고 소음 점검 부탁드립니다.');
-    
-    const dummyScores: Record<string, number> = {};
-    CHECKLIST_ITEMS.forEach((item) => {
-      if (item.options && item.options.length > 0) {
-        dummyScores[item.id] = item.options[0].val;
+  addOptionIfNew('country', '한국 (Korea)');
+  addOptionIfNew('branch', '강남 데모점');
+  addOptionIfNew('inspector', '김민지 매니저');
+
+  setManagerComment(
+    isItemListEn
+      ? 'Overall store condition is good. Please maintain the current management level.'
+      : '전반적인 매장 관리 상태가 우수합니다. 현재 관리 수준을 유지해 주세요.'
+  );
+
+  setOwnerComment(
+    isItemListEn
+      ? 'We will continue to maintain the current standards.'
+      : '현재 관리 기준을 지속적으로 유지하겠습니다.'
+  );
+
+  const demoScores: Record<string, number> = {};
+
+  CHECKLIST_ITEMS.forEach((item) => {
+    if (item.options && item.options.length > 0) {
+      const validOptions = item.options.filter((option: any) => option.val !== -1);
+
+      if (validOptions.length > 0) {
+        demoScores[item.id] = validOptions[0].val;
       }
-    });
-    setScores(dummyScores);
-    alert('⚡ 모든 점수 항목 및 코멘트가 자동 채워졌습니다!');
-  };
+    }
+  });
+
+  setScores(demoScores);
+
+  alert('⚡ 데모 점검 데이터가 자동 입력되었습니다!');
+};
 
   const fetchLibrary = async () => {
     setIsLoadingLibrary(true);
