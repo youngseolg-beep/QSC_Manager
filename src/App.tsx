@@ -770,11 +770,11 @@ export default function App() {
 
           <div className="flex items-center gap-1.5 flex-wrap">
             <button
-              onClick={fillDummyData}
+              onClick={fillDemoData}
               className="flex items-center gap-1 bg-amber-50 text-amber-700 px-2 py-1 rounded-lg text-[11px] font-bold border border-amber-300 hover:bg-amber-100 shadow-sm transition-all"
             >
               <Zap className="w-3 h-3 fill-amber-500 text-amber-500" />
-              더미 채우기
+              데모 점검 자동입력
             </button>
 
             <button
